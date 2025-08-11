@@ -26,6 +26,37 @@ class UnitySceneAPI:
             print(f"Error opening scene: {e}")
             return False
     
+    def get_build_scenes(self) -> Optional[List[Dict]]:
+        try:
+            response = requests.get(f"{self.base_url}/build/scenes")
+            response.raise_for_status()
+            return response.json()
+        except requests.exceptions.RequestException as e:
+            print(f"Error getting build scenes: {e}")
+            return None
+    
+    def add_scene_to_build(self, scene_path: str) -> bool:
+        try:
+            response = requests.post(f"{self.base_url}/build/scenes/add", 
+                                   json={"scenePath": scene_path})
+            response.raise_for_status()
+            result = response.json()
+            return result.get("success", False)
+        except requests.exceptions.RequestException as e:
+            print(f"Error adding scene to build: {e}")
+            return False
+    
+    def remove_scene_from_build(self, scene_identifier: str) -> bool:
+        try:
+            response = requests.delete(f"{self.base_url}/build/scenes/remove", 
+                                     json={"sceneIdentifier": scene_identifier})
+            response.raise_for_status()
+            result = response.json()
+            return result.get("success", False)
+        except requests.exceptions.RequestException as e:
+            print(f"Error removing scene from build: {e}")
+            return False
+    
     def create_object(self, name: str = "GameObject", parent_path: str = "") -> Optional[str]:
         try:
             response = requests.post(f"{self.base_url}/objects/create", 
@@ -119,22 +150,23 @@ class UnitySceneAPI:
         
         paths = []
         
-        def search_recursive(obj_data, current_path=""):
+        def search_recursive(obj_data):
             if name.lower() in obj_data["name"].lower():
                 paths.append(obj_data["path"])
             
             for child in obj_data.get("children", []):
-                search_recursive(child, obj_data["path"])
+                search_recursive(child)
         
         for root_obj in hierarchy.get("rootObjects", []):
             search_recursive(root_obj)
         
         return paths
     
-    def print_hierarchy(self, obj: Dict = None, level: int = 0, data: Dict = None):
-        if data is None:
+    def print_hierarchy(self, obj: Dict = None, level: int = 0):
+        if obj is None:
             data = self.get_scene_hierarchy()
             if data is None:
+                print("Failed to get scene hierarchy")
                 return
             print(f"Scene: {data['sceneName']} ({data['scenePath']})")
             for root_obj in data['rootObjects']:
@@ -161,6 +193,25 @@ class UnitySceneAPI:
             for prop_name, prop_value in comp.get("properties", {}).items():
                 print(f"    {prop_name}: {prop_value}")
 
+    def print_build_scenes(self):
+        scenes = self.get_build_scenes()
+        if not scenes:
+            print("No scenes in build or failed to get build scenes")
+            return
+        
+        print("Scenes in Build Settings:")
+        if isinstance(scenes, dict) and 'scenes' in scenes:
+            scenes = scenes['scenes']
+        
+        for i, scene in enumerate(scenes):
+            if isinstance(scene, dict):
+                name = scene.get('name', 'Unknown')
+                path = scene.get('path', 'Unknown')
+                enabled = scene.get('enabled', False)
+                print(f"  {i}: {name} - {path} {'(enabled)' if enabled else '(disabled)'}")
+            else:
+                print(f"  {i}: {scene}")
+
 def example_workflow():
     unity = UnitySceneAPI()
     
@@ -169,39 +220,68 @@ def example_workflow():
     print("\n1. Getting current scene hierarchy:")
     unity.print_hierarchy()
     
-    print("\n2. Creating new object:")
+    print("\n2. Getting build scenes:")
+    unity.print_build_scenes()
+    
+    print("\n3. Creating new object:")
     new_obj_path = unity.create_object("TestObject")
     if new_obj_path:
         print(f"Created object: {new_obj_path}")
     
-    print("\n3. Adding Rigidbody component:")
+    print("\n4. Adding Rigidbody component:")
     if unity.add_component(new_obj_path, "Rigidbody"):
         print("Rigidbody component added")
     
-    print("\n4. Getting object components:")
+    print("\n5. Getting object components:")
     unity.print_object_info(new_obj_path)
     
-    print("\n5. Moving object to position (5, 10, 0):")
+    print("\n6. Moving object to position (5, 10, 0):")
     if unity.move_object(new_obj_path, 5, 10, 0):
         print("Object moved")
     
-    print("\n6. Modifying Rigidbody mass:")
+    print("\n7. Modifying Rigidbody mass:")
     if unity.modify_component(new_obj_path, "Rigidbody", {"mass": 2.5}):
         print("Rigidbody mass modified")
     
-    print("\n7. Updated object info:")
+    print("\n8. Updated object info:")
     unity.print_object_info(new_obj_path)
     
-    print("\n8. Removing Rigidbody component:")
+    print("\n9. Removing Rigidbody component:")
     if unity.remove_component(new_obj_path, "Rigidbody"):
         print("Rigidbody component removed")
     
-    print("\n9. Deleting object:")
+    print("\n10. Deleting object:")
     if unity.delete_object(new_obj_path):
         print("Object deleted")
     
-    print("\n10. Final scene hierarchy:")
+    print("\n11. Final scene hierarchy:")
     unity.print_hierarchy()
+
+def build_scenes_example():
+    unity = UnitySceneAPI()
+    
+    print("=== Build Scenes Management ===")
+    
+    print("\n1. Current build scenes:")
+    unity.print_build_scenes()
+    
+    print("\n2. Adding scene to build (if exists):")
+    if unity.add_scene_to_build("Assets/Scenes/TestScene.unity"):
+        print("Scene added to build")
+    else:
+        print("Failed to add scene to build")
+    
+    print("\n3. Updated build scenes:")
+    unity.print_build_scenes()
+    
+    print("\n4. Removing scene from build:")
+    if unity.remove_scene_from_build("TestScene"):
+        print("Scene removed from build")
+    else:
+        print("Failed to remove scene from build")
+    
+    print("\n5. Final build scenes:")
+    unity.print_build_scenes()
 
 def complex_example():
     unity = UnitySceneAPI()
@@ -230,5 +310,7 @@ def complex_example():
 
 if __name__ == "__main__":
     example_workflow()
+    print("\n" + "="*50 + "\n")
+    build_scenes_example()
     print("\n" + "="*50 + "\n")
     complex_example()
