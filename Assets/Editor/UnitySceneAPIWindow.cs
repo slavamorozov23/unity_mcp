@@ -10,6 +10,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System;
 using System.Reflection;
+using UnityEditor.Compilation;
 
 public class UnitySceneAPIWindow : EditorWindow
 {
@@ -18,17 +19,85 @@ public class UnitySceneAPIWindow : EditorWindow
     private bool isRunning = false;
     private int port = 8080;
 
+    private const string PORT_KEY = "UnitySceneAPI_Port";
+    private const string RUNNING_KEY = "UnitySceneAPI_WasRunning";
+
     [MenuItem("Tools/Scene API Server")]
     public static void ShowWindow()
     {
         GetWindow<UnitySceneAPIWindow>("Scene API Server");
     }
 
+    void OnEnable()
+    {
+        port = EditorPrefs.GetInt(PORT_KEY, 8080);
+
+        CompilationPipeline.compilationStarted += OnCompilationStarted;
+        CompilationPipeline.compilationFinished += OnCompilationFinished;
+        AssemblyReloadEvents.beforeAssemblyReload += OnBeforeAssemblyReload;
+        AssemblyReloadEvents.afterAssemblyReload += OnAfterAssemblyReload;
+
+        if (EditorPrefs.GetBool(RUNNING_KEY, false))
+        {
+            EditorPrefs.SetBool(RUNNING_KEY, false);
+            EditorApplication.delayCall += () => {
+                if (this != null)
+                {
+                    StartServer();
+                }
+            };
+        }
+    }
+
+    void OnDisable()
+    {
+        CompilationPipeline.compilationStarted -= OnCompilationStarted;
+        CompilationPipeline.compilationFinished -= OnCompilationFinished;
+        AssemblyReloadEvents.beforeAssemblyReload -= OnBeforeAssemblyReload;
+        AssemblyReloadEvents.afterAssemblyReload -= OnAfterAssemblyReload;
+
+        if (isRunning)
+        {
+            StopServer();
+        }
+    }
+
+    void OnCompilationStarted(object obj)
+    {
+        if (isRunning)
+        {
+            EditorPrefs.SetBool(RUNNING_KEY, true);
+            StopServer();
+        }
+    }
+
+    void OnCompilationFinished(object obj)
+    {
+    }
+
+    void OnBeforeAssemblyReload()
+    {
+        if (isRunning)
+        {
+            EditorPrefs.SetBool(RUNNING_KEY, true);
+            StopServer();
+        }
+    }
+
+    void OnAfterAssemblyReload()
+    {
+    }
+
     void OnGUI()
     {
         GUILayout.Label("Unity Scene API Server", EditorStyles.boldLabel);
 
-        port = EditorGUILayout.IntField("Port:", port);
+        int newPort = EditorGUILayout.IntField("Port:", port);
+        if (newPort != port)
+        {
+            port = newPort;
+            EditorPrefs.SetInt(PORT_KEY, port);
+        }
 
         if (!isRunning)
         {
@@ -64,57 +133,107 @@ public class UnitySceneAPIWindow : EditorWindow
     {
         MainThreadDispatcher.Initialize();
 
-        httpListener = new HttpListener();
-        httpListener.Prefixes.Add($"http://localhost:{port}/");
-        httpListener.Start();
+        try
+        {
+            httpListener = new HttpListener();
+            httpListener.Prefixes.Add($"http://localhost:{port}/");
+            httpListener.Start();
 
-        httpListenerThread = new Thread(new ThreadStart(Listen));
-        httpListenerThread.Start();
+            httpListenerThread = new Thread(new ThreadStart(Listen));
+            httpListenerThread.IsBackground = true;
+            httpListenerThread.Start();
 
-        isRunning = true;
-        Debug.Log($"Scene API Server started on port {port}");
+            isRunning = true;
+            Debug.Log($"Scene API Server started on port {port}");
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Failed to start server: {ex.Message}");
+            isRunning = false;
+        }
     }
 
     void StopServer()
     {
+        isRunning = false;
+
         if (httpListener != null)
         {
-            httpListener.Stop();
-            httpListener.Close();
+            try
+            {
+                httpListener.Stop();
+                httpListener.Close();
+            }
+            catch { }
+            httpListener = null;
         }
 
         if (httpListenerThread != null)
         {
-            httpListenerThread.Abort();
+            try
+            {
+                httpListenerThread.Join(100);
+                if (httpListenerThread.IsAlive)
+                {
+                    httpListenerThread.Abort();
+                }
+            }
+            catch { }
+            httpListenerThread = null;
         }
 
-        isRunning = false;
-        Debug.Log("Scene API Server stopped");
-
         MainThreadDispatcher.Cleanup();
+        Debug.Log("Scene API Server stopped");
     }
 
     void OnDestroy()
     {
-        StopServer();
+        if (isRunning)
+        {
+            StopServer();
+        }
     }
 
     private void Listen()
     {
-        while (httpListener.IsListening)
+        while (httpListener != null && httpListener.IsListening)
         {
             try
             {
-                HttpListenerContext context = httpListener.GetContext();
-                MainThreadDispatcher.Enqueue(() => Process(context));
+                IAsyncResult result = httpListener.BeginGetContext(new AsyncCallback(ProcessRequest), httpListener);
+                result.AsyncWaitHandle.WaitOne();
             }
-            catch (System.Exception ex)
+            catch (ObjectDisposedException)
             {
-                if (!(ex is HttpListenerException))
+                break;
+            }
+            catch (Exception ex)
+            {
+                if (httpListener != null && httpListener.IsListening)
                 {
                     Debug.LogError($"HTTP Listener error: {ex.Message}");
                 }
             }
+        }
+    }
+
+    private void ProcessRequest(IAsyncResult result)
+    {
+        if (httpListener == null || !httpListener.IsListening)
+            return;
+
+        try
+        {
+            HttpListener listener = (HttpListener)result.AsyncState;
+            HttpListenerContext context = listener.EndGetContext(result);
+            MainThreadDispatcher.Enqueue(() => Process(context));
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            Debug.LogError($"Error processing request: {ex.Message}");
         }
     }
 
@@ -166,7 +285,7 @@ public class UnitySceneAPIWindow : EditorWindow
                     break;
             }
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             response = JsonConvert.SerializeObject(new { error = ex.Message });
         }
@@ -175,8 +294,13 @@ public class UnitySceneAPIWindow : EditorWindow
         context.Response.ContentType = "application/json";
         context.Response.ContentLength64 = buffer.Length;
         context.Response.AddHeader("Access-Control-Allow-Origin", "*");
-        context.Response.OutputStream.Write(buffer, 0, buffer.Length);
-        context.Response.OutputStream.Close();
+
+        try
+        {
+            context.Response.OutputStream.Write(buffer, 0, buffer.Length);
+            context.Response.OutputStream.Close();
+        }
+        catch { }
     }
 
     private string GetRequestBody(HttpListenerContext context)
@@ -206,7 +330,7 @@ public class UnitySceneAPIWindow : EditorWindow
 
             return JsonConvert.SerializeObject(sceneData, Formatting.Indented);
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             return JsonConvert.SerializeObject(new { error = $"Error getting scene hierarchy: {ex.Message}" });
         }
@@ -224,8 +348,18 @@ public class UnitySceneAPIWindow : EditorWindow
                 return rootObjects;
             }
 
-            var sceneRootObjects = activeScene.GetRootGameObjects();
-            if (sceneRootObjects == null)
+            GameObject[] sceneRootObjects = null;
+
+            try
+            {
+                sceneRootObjects = activeScene.GetRootGameObjects();
+            }
+            catch
+            {
+                return rootObjects;
+            }
+
+            if (sceneRootObjects == null || sceneRootObjects.Length == 0)
             {
                 return rootObjects;
             }
@@ -234,11 +368,18 @@ public class UnitySceneAPIWindow : EditorWindow
             {
                 if (rootGO != null)
                 {
-                    rootObjects.Add(GetGameObjectData(rootGO, ""));
+                    try
+                    {
+                        rootObjects.Add(GetGameObjectData(rootGO, ""));
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogWarning($"Error processing GameObject {rootGO.name}: {ex.Message}");
+                    }
                 }
             }
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             Debug.LogError($"Error getting root objects: {ex.Message}");
         }
@@ -248,12 +389,22 @@ public class UnitySceneAPIWindow : EditorWindow
 
     private object GetGameObjectData(GameObject go, string parentPath)
     {
+        if (go == null) return null;
+
         string currentPath = string.IsNullOrEmpty(parentPath) ? go.name : $"{parentPath}/{go.name}";
         var children = new List<object>();
 
-        for (int i = 0; i < go.transform.childCount; i++)
+        Transform transform = go.transform;
+        if (transform != null)
         {
-            children.Add(GetGameObjectData(go.transform.GetChild(i).gameObject, currentPath));
+            for (int i = 0; i < transform.childCount; i++)
+            {
+                Transform child = transform.GetChild(i);
+                if (child != null && child.gameObject != null)
+                {
+                    children.Add(GetGameObjectData(child.gameObject, currentPath));
+                }
+            }
         }
 
         return new
@@ -264,10 +415,10 @@ public class UnitySceneAPIWindow : EditorWindow
             active = go.activeInHierarchy,
             tag = go.tag,
             layer = go.layer,
-            position = new { x = go.transform.position.x, y = go.transform.position.y, z = go.transform.position.z },
-            rotation = new { x = go.transform.rotation.x, y = go.transform.rotation.y, z = go.transform.rotation.z, w = go.transform.rotation.w },
-            scale = new { x = go.transform.localScale.x, y = go.transform.localScale.y, z = go.transform.localScale.z },
-            components = go.GetComponents<Component>().Select(c => c.GetType().Name).ToArray(),
+            position = transform != null ? new { x = transform.position.x, y = transform.position.y, z = transform.position.z } : new { x = 0f, y = 0f, z = 0f },
+            rotation = transform != null ? new { x = transform.rotation.x, y = transform.rotation.y, z = transform.rotation.z, w = transform.rotation.w } : new { x = 0f, y = 0f, z = 0f, w = 1f },
+            scale = transform != null ? new { x = transform.localScale.x, y = transform.localScale.y, z = transform.localScale.z } : new { x = 1f, y = 1f, z = 1f },
+            components = go.GetComponents<Component>().Where(c => c != null).Select(c => c.GetType().Name).ToArray(),
             children = children
         };
     }
@@ -394,7 +545,7 @@ public class UnitySceneAPIWindow : EditorWindow
             return JsonConvert.SerializeObject(new { error = "Object not found" });
         }
 
-        var components = obj.GetComponents<Component>().Select(comp => new
+        var components = obj.GetComponents<Component>().Where(c => c != null).Select(comp => new
         {
             name = comp.GetType().Name,
             type = comp.GetType().FullName,
@@ -488,7 +639,7 @@ public class UnitySceneAPIWindow : EditorWindow
             Component comp = obj.AddComponent(type);
             return JsonConvert.SerializeObject(new { success = true, message = $"Component added: {componentType}" });
         }
-        catch (System.Exception ex)
+        catch (Exception ex)
         {
             return JsonConvert.SerializeObject(new { success = false, message = $"Failed to add component: {ex.Message}" });
         }
@@ -595,9 +746,24 @@ public class UnitySceneAPIWindow : EditorWindow
         string[] pathParts = path.Split('/');
         GameObject current = null;
 
-        foreach (GameObject rootGO in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+        var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+        if (!activeScene.IsValid()) return null;
+
+        GameObject[] rootObjects = null;
+        try
         {
-            if (rootGO.name == pathParts[0])
+            rootObjects = activeScene.GetRootGameObjects();
+        }
+        catch
+        {
+            return null;
+        }
+
+        if (rootObjects == null || rootObjects.Length == 0) return null;
+
+        foreach (GameObject rootGO in rootObjects)
+        {
+            if (rootGO != null && rootGO.name == pathParts[0])
             {
                 current = rootGO;
                 break;
@@ -615,56 +781,58 @@ public class UnitySceneAPIWindow : EditorWindow
 
         return current;
     }
-}
 
-public class MainThreadDispatcher
-{
-    private static readonly Queue<System.Action> actions = new Queue<System.Action>();
-    private static bool isInitialized = false;
-
-    public static void Initialize()
+    private static class MainThreadDispatcher
     {
-        if (!isInitialized)
-        {
-            EditorApplication.update += Update;
-            isInitialized = true;
-        }
-    }
+        private static readonly Queue<Action> actions = new Queue<Action>();
+        private static bool isInitialized = false;
 
-    public static void Cleanup()
-    {
-        if (isInitialized)
+        public static void Initialize()
         {
-            EditorApplication.update -= Update;
-            isInitialized = false;
-            lock (actions)
+            if (!isInitialized)
             {
-                actions.Clear();
+                EditorApplication.update += Update;
+                isInitialized = true;
             }
         }
-    }
 
-    public static void Enqueue(System.Action action)
-    {
-        lock (actions)
+        public static void Cleanup()
         {
-            actions.Enqueue(action);
-        }
-    }
-
-    private static void Update()
-    {
-        lock (actions)
-        {
-            while (actions.Count > 0)
+            if (isInitialized)
             {
-                try
+                EditorApplication.update -= Update;
+                isInitialized = false;
+                lock (actions)
                 {
-                    actions.Dequeue().Invoke();
+                    actions.Clear();
                 }
-                catch (System.Exception ex)
+            }
+        }
+
+        public static void Enqueue(Action action)
+        {
+            if (action == null) return;
+
+            lock (actions)
+            {
+                actions.Enqueue(action);
+            }
+        }
+
+        private static void Update()
+        {
+            lock (actions)
+            {
+                while (actions.Count > 0)
                 {
-                    Debug.LogError($"Error executing main thread action: {ex.Message}");
+                    try
+                    {
+                        actions.Dequeue().Invoke();
+                    }
+                    catch (Exception ex)
+                    {
+                        Debug.LogError($"Error executing main thread action: {ex.Message}");
+                    }
                 }
             }
         }
