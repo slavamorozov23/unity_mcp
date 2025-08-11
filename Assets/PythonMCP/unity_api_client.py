@@ -5,6 +5,7 @@ import os
 import tempfile
 from datetime import datetime
 from collections import Counter
+import difflib
 
 MAX_LOG_CHARS = 10000000
 LOG_FILENAME = "unity_api_client.log.txt"
@@ -12,6 +13,7 @@ LOG_FILENAME = "unity_api_client.log.txt"
 class UnitySceneAPI:
     def __init__(self, host: str = "localhost", port: int = 8080):
         self.base_url = f"http://{host}:{port}"
+        self._clear_log_file()
         
     def get_scene_hierarchy(self) -> Optional[Dict]:
         try:
@@ -169,6 +171,16 @@ class UnitySceneAPI:
         """Публичный метод: получить путь к лог-файлу"""
         return self._get_log_path()
     
+    def _clear_log_file(self) -> None:
+        """Удаляет временный файл логов перед началом работы"""
+        try:
+            log_path = self._get_log_path()
+            if os.path.exists(log_path):
+                os.remove(log_path)
+        except Exception:
+            # Ошибки при удалении лог-файла не должны мешать основной работе
+            pass
+    
     def _log_structured(self, request_payload: Dict, response_payload: Dict) -> None:
         try:
             ts = datetime.utcnow().isoformat() + "Z"
@@ -206,6 +218,44 @@ class UnitySceneAPI:
             
             if action == "get_hierarchy":
                 hierarchy = self.get_scene_hierarchy()
+
+                # Optional: filter hierarchy starting from a node whose path contains the substring
+                try:
+                    params_from_path = params.get("from_path") or params.get("path") or params.get("path_contains")
+                except Exception:
+                    params_from_path = None
+
+                if hierarchy and not (isinstance(hierarchy, dict) and "error" in hierarchy) and params_from_path:
+                    sub = params_from_path.strip()
+
+                    def find_first_match(node: Dict, needle: str):
+                        p = node.get("path", "")
+                        if isinstance(p, str) and needle.lower() in p.lower():
+                            return node
+                        for ch in node.get("children", []) or []:
+                            found = find_first_match(ch, needle)
+                            if found:
+                                return found
+                        return None
+
+                    found_node = None
+                    for root in hierarchy.get("rootObjects", []) or []:
+                        found_node = find_first_match(root, sub)
+                        if found_node:
+                            break
+
+                    if found_node:
+                        def count_nodes(n: Dict) -> int:
+                            total = 1
+                            for ch in n.get("children", []) or []:
+                                total += count_nodes(ch)
+                            return total
+                        hierarchy = {
+                            "sceneName": hierarchy.get("sceneName", "Unknown"),
+                            "rootObjects": [found_node],
+                            "totalObjects": count_nodes(found_node)
+                        }
+
                 result = {
                     "success": True,
                     "action": action,
@@ -303,9 +353,16 @@ class UnitySceneAPI:
     def _format_hierarchy_as_tree(self, hierarchy: Dict) -> Dict:
         """Форматирует иерархию сцены как JSON дерево c группировкой одноимённых дочерних объектов,
         имеющих одинаковый набор типов компонентов (значения параметров компонентов игнорируются).
+        Теперь также группирует объекты с похожими именами (75%+ сходства) при одинаковых компонентах.
         Для сгруппированных записей добавляется поле "count" и список "paths"."""
         if not hierarchy or "error" in hierarchy:
             return hierarchy
+        
+        def name_similarity(name1: str, name2: str) -> float:
+            """Вычисляет сходство между двумя именами (0.0 - 1.0)"""
+            if name1 == name2:
+                return 1.0
+            return difflib.SequenceMatcher(None, name1.lower(), name2.lower()).ratio()
         
         def components_signature(obj: Dict) -> tuple:
             comps = obj.get("components", []) or []
@@ -320,23 +377,32 @@ class UnitySceneAPI:
                 comps.extend([type_name] * int(cnt))
             return comps
         
+        def get_parent_path(obj_path: str) -> str:
+            """Извлекает путь родителя из пути объекта"""
+            if not obj_path or "/" not in obj_path:
+                return ""
+            return "/".join(obj_path.split("/")[:-1])
+        
         def format_grouped_list(children_raw: List[Dict]) -> List[Dict]:
-            groups: Dict[tuple, List[Dict]] = {}
+            # Сначала группируем по точному совпадению имени и компонентов
+            exact_groups: Dict[tuple, List[Dict]] = {}
             for ch in children_raw or []:
                 key = (ch.get("name"), components_signature(ch))
-                groups.setdefault(key, []).append(ch)
-            formatted_children: List[Dict] = []
-            for (name, sig), items in groups.items():
+                exact_groups.setdefault(key, []).append(ch)
+            
+            # Теперь ищем группы по сходству имен среди одиночных объектов
+            single_objects = []
+            grouped_objects = []
+            
+            for (name, sig), items in exact_groups.items():
                 if len(items) == 1:
-                    formatted_children.append(format_object(items[0]))
+                    single_objects.append((name, sig, items[0]))
                 else:
-                    # Объединяем детей всех элементов группы и рекурсивно группируем их
+                    # Точно одинаковые объекты - группируем как раньше
                     merged_children_raw: List[Dict] = []
                     for it in items:
                         merged_children_raw.extend(it.get("children", []))
 
-                    # Сжимаем пути: если путь один и тот же, не перечисляем 100 раз;
-                    # если путей несколько, даём агрегированные количества по каждому пути.
                     from collections import Counter as _Counter
                     path_list = [it.get("path") for it in items if it.get("path")]
                     pc = _Counter(path_list)
@@ -349,17 +415,80 @@ class UnitySceneAPI:
                     }
 
                     if len(pc) == 1:
-                        # Один уникальный путь — достаточно одного значения
                         only_path = next(iter(pc.keys())) if pc else None
                         if only_path:
                             grouped_node["path"] = only_path
                     elif len(pc) > 1:
-                        # Несколько разных путей — отдаём сгруппированные значения с количеством
                         grouped_node["path_groups"] = [
                             {"path": p, "count": c} for p, c in sorted(pc.items())
                         ]
 
+                    grouped_objects.append(grouped_node)
+            
+            # Теперь группируем одиночные объекты по сходству имен
+            similarity_groups: List[List[tuple]] = []
+            used_indices = set()
+            
+            for i, (name1, sig1, obj1) in enumerate(single_objects):
+                if i in used_indices:
+                    continue
+                    
+                current_group = [(name1, sig1, obj1)]
+                used_indices.add(i)
+                parent1 = get_parent_path(obj1.get("path", ""))
+                
+                for j, (name2, sig2, obj2) in enumerate(single_objects):
+                    if j in used_indices or i == j:
+                        continue
+                    
+                    parent2 = get_parent_path(obj2.get("path", ""))
+                    
+                    # Проверяем: одинаковые компоненты, одинаковый родитель, сходство имен >= 75%
+                    if (sig1 == sig2 and 
+                        parent1 == parent2 and 
+                        name_similarity(name1, name2) >= 0.75):
+                        current_group.append((name2, sig2, obj2))
+                        used_indices.add(j)
+                
+                similarity_groups.append(current_group)
+            
+            # Формируем окончательный результат
+            formatted_children: List[Dict] = []
+            
+            # Добавляем уже сгруппированные объекты (точное совпадение)
+            formatted_children.extend(grouped_objects)
+            
+            # Обрабатываем группы по сходству
+            for group in similarity_groups:
+                if len(group) == 1:
+                    # Одиночный объект
+                    name, sig, obj = group[0]
+                    formatted_children.append(format_object(obj))
+                else:
+                    # Группа объектов с похожими именами
+                    names = [item[0] for item in group]
+                    objects = [item[2] for item in group]
+                    sig = group[0][1]  # Компоненты одинаковые
+                    
+                    # Объединяем детей всех объектов группы
+                    merged_children_raw: List[Dict] = []
+                    for obj in objects:
+                        merged_children_raw.extend(obj.get("children", []))
+                    
+                    # Определяем базовое имя для группы (самое частое или первое)
+                    name_counter = Counter(names)
+                    base_name = name_counter.most_common(1)[0][0] if name_counter else names[0]
+                    
+                    grouped_node = {
+                        "name": base_name,
+                        "names": sorted(list(set(names))),  # Список уникальных имен
+                        "count": len(objects),
+                        "components": rebuild_components_from_signature(sig),
+                        "children": format_grouped_list(merged_children_raw)
+                    }
+                    
                     formatted_children.append(grouped_node)
+            
             return formatted_children
         
         def format_object(obj: Dict) -> Dict:
@@ -422,7 +551,16 @@ def main():
     }
     components_response = unity.execute_command(components_request)
     print(json.dumps(components_response, indent=2, ensure_ascii=False))
-    
+ 
+    # Специальный тест: получить иерархию начиная с узла, путь которого содержит "Enemies"
+    subtree_request = {
+        "action": "get_hierarchy",
+        "params": {"from_path": "Enemies"}
+    }
+    subtree_response = unity.execute_command(subtree_request)
+    print("Subtree (from_path='Enemies'):")
+    print(json.dumps(subtree_response, indent=2, ensure_ascii=False))
+
     print("Log saved to:", unity.get_log_file_path())
 
 if __name__ == "__main__":
