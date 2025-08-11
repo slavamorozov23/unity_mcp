@@ -4,8 +4,9 @@ from typing import Dict, List, Optional, Any
 import os
 import tempfile
 from datetime import datetime
+from collections import Counter
 
-MAX_LOG_CHARS = 100000
+MAX_LOG_CHARS = 10000000
 LOG_FILENAME = "unity_api_client.log.txt"
 
 class UnitySceneAPI:
@@ -300,31 +301,85 @@ class UnitySceneAPI:
             return result
     
     def _format_hierarchy_as_tree(self, hierarchy: Dict) -> Dict:
-        """Форматирует иерархию сцены как JSON дерево"""
+        """Форматирует иерархию сцены как JSON дерево c группировкой одноимённых дочерних объектов,
+        имеющих одинаковый набор типов компонентов (значения параметров компонентов игнорируются).
+        Для сгруппированных записей добавляется поле "count" и список "paths"."""
         if not hierarchy or "error" in hierarchy:
             return hierarchy
         
-        def format_object(obj):
-            formatted = {
+        def components_signature(obj: Dict) -> tuple:
+            comps = obj.get("components", []) or []
+            if not isinstance(comps, list):
+                return tuple()
+            counter = Counter([str(c) for c in comps])
+            return tuple(sorted(counter.items()))  # [(typeName, count), ...] deterministically sorted
+        
+        def rebuild_components_from_signature(sig: tuple) -> List[str]:
+            comps: List[str] = []
+            for type_name, cnt in sig:
+                comps.extend([type_name] * int(cnt))
+            return comps
+        
+        def format_grouped_list(children_raw: List[Dict]) -> List[Dict]:
+            groups: Dict[tuple, List[Dict]] = {}
+            for ch in children_raw or []:
+                key = (ch.get("name"), components_signature(ch))
+                groups.setdefault(key, []).append(ch)
+            formatted_children: List[Dict] = []
+            for (name, sig), items in groups.items():
+                if len(items) == 1:
+                    formatted_children.append(format_object(items[0]))
+                else:
+                    # Объединяем детей всех элементов группы и рекурсивно группируем их
+                    merged_children_raw: List[Dict] = []
+                    for it in items:
+                        merged_children_raw.extend(it.get("children", []))
+
+                    # Сжимаем пути: если путь один и тот же, не перечисляем 100 раз;
+                    # если путей несколько, даём агрегированные количества по каждому пути.
+                    from collections import Counter as _Counter
+                    path_list = [it.get("path") for it in items if it.get("path")]
+                    pc = _Counter(path_list)
+
+                    grouped_node = {
+                        "name": name,
+                        "count": len(items),
+                        "components": rebuild_components_from_signature(sig),
+                        "children": format_grouped_list(merged_children_raw)
+                    }
+
+                    if len(pc) == 1:
+                        # Один уникальный путь — достаточно одного значения
+                        only_path = next(iter(pc.keys())) if pc else None
+                        if only_path:
+                            grouped_node["path"] = only_path
+                    elif len(pc) > 1:
+                        # Несколько разных путей — отдаём сгруппированные значения с количеством
+                        grouped_node["path_groups"] = [
+                            {"path": p, "count": c} for p, c in sorted(pc.items())
+                        ]
+
+                    formatted_children.append(grouped_node)
+            return formatted_children
+        
+        def format_object(obj: Dict) -> Dict:
+            return {
                 "name": obj.get("name"),
                 "path": obj.get("path"),
                 "active": obj.get("active", True),
-                "children": []
+                "components": obj.get("components", []) or [],
+                "children": format_grouped_list(obj.get("children", []))
             }
-            
-            for child in obj.get("children", []):
-                formatted["children"].append(format_object(child))
-            
-            return formatted
         
         return {
             "scene_name": hierarchy.get("sceneName", "Unknown"),
-            "root_objects": [format_object(obj) for obj in hierarchy.get("rootObjects", [])],
+            "root_objects": format_grouped_list(hierarchy.get("rootObjects", [])),
             "total_objects": hierarchy.get("totalObjects", 0)
         }
     
     def _filter_inspector_properties(self, components_data) -> Dict:
-        """Фильтрует только свойства, видимые и редактируемые в Inspector Unity"""
+        """Обрабатывает данные компонентов, полученные от Unity API.
+        Основная фильтрация теперь происходит на стороне Unity C# кода."""
         if not components_data:
             return {}
             
@@ -335,16 +390,7 @@ class UnitySceneAPI:
         if not isinstance(components_data, dict):
             return {"error": "Invalid components data format"}
         
-        # Список свойств, которые НЕ видны или НЕ редактируемые в Inspector
-        hidden_properties = {
-            'hideFlags', 'worldToLocalMatrix', 'localToWorldMatrix', 'root', 'childCount',
-            'hierarchyCapacity', 'hierarchyCount', 'transform', 'gameObject', 'tag',
-            'right', 'up', 'forward', 'hasChanged', 'parent', 'worldCenterOfMass',
-            'automaticCenterOfMass', 'automaticInertiaTensor', 'inertiaTensorRotation',
-            'inertiaTensor', 'excludeLayers', 'includeLayers', 'sleepVelocity', 
-            'sleepAngularVelocity', 'solverIterationCount', 'solverVelocityIterationCount'
-        }
-        
+        # Преобразуем структуру данных для удобства использования
         filtered_components = {}
         
         for component_name, component_data in components_data.items():
@@ -355,24 +401,10 @@ class UnitySceneAPI:
             if not isinstance(component_data, dict):
                 filtered_components[component_name] = component_data
                 continue
-                
-            filtered_component = {}
             
-            for prop_name, prop_value in component_data.items():
-                if prop_name not in hidden_properties:
-                    filtered_component[prop_name] = prop_value
-            
-            # Дополнительная фильтрация для Transform
-            if component_name == "Transform":
-                # Оставляем только основные редактируемые свойства Transform
-                transform_editable = {}
-                for key in ['position', 'localPosition', 'rotation', 'localRotation', 
-                           'eulerAngles', 'localEulerAngles', 'localScale', 'name']:
-                    if key in filtered_component:
-                        transform_editable[key] = filtered_component[key]
-                filtered_components[component_name] = transform_editable
-            else:
-                filtered_components[component_name] = filtered_component
+            # Unity API теперь возвращает только Inspector-видимые свойства,
+            # поэтому просто передаем данные как есть
+            filtered_components[component_name] = component_data
         
         return filtered_components
 

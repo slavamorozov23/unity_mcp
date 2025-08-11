@@ -559,24 +559,107 @@ public class UnitySceneAPIWindow : EditorWindow
     {
         var properties = new Dictionary<string, object>();
 
-        foreach (FieldInfo field in component.GetType().GetFields(BindingFlags.Public | BindingFlags.Instance))
+        // Список свойств, которые НЕ должны отображаться в Inspector
+        var hiddenProperties = new HashSet<string>
+        {
+            "hideFlags", "name", "tag", "transform", "gameObject", "enabled", "isActiveAndEnabled",
+            "useGUILayout", "runInEditMode", "destroyCancellationToken", "worldToLocalMatrix", 
+            "localToWorldMatrix", "root", "childCount", "hierarchyCapacity", "hierarchyCount",
+            "right", "up", "forward", "hasChanged", "parent", "worldCenterOfMass",
+            "automaticCenterOfMass", "automaticInertiaTensor", "inertiaTensorRotation",
+            "inertiaTensor", "excludeLayers", "includeLayers", "sleepVelocity", 
+            "sleepAngularVelocity", "solverIterationCount", "solverVelocityIterationCount",
+            "lossyScale", "cullingMatrix", "cameraToWorldMatrix", "worldToCameraMatrix",
+            "projectionMatrix", "nonJitteredProjectionMatrix", "previousViewProjectionMatrix",
+            "useJitteredProjectionMatrixForTransparentRendering", "areVRStereoViewMatricesWithinSingleCullTolerance",
+            "scene", "commandBufferCount", "isOrthoGraphic", "near", "far", "fov", "hdr",
+            "stereoMirrorMode", "pixelRect", "scaledPixelWidth", "scaledPixelHeight",
+            "activeTexture", "velocity", "aspect", "pixelWidth", "pixelHeight",
+            "stereoEnabled", "stereoSeparation", "stereoConvergence", "stereoTargetEye",
+            "stereoActiveEye", "sceneViewFilterMode", "version", "cameraStack", "scriptableRenderer",
+            "volumeStack", "volumeLayerMask", "volumeTrigger", "requiresVolumeFrameworkUpdate",
+            "screenSizeOverride", "screenCoordScaleBias", "colliders", "profile", "sharedProfile",
+            "OutputCamera", "ControlledObject", "DefaultWorldUp", "ActiveVirtualCamera",
+            "IsBlending", "ActiveBlend", "CurrentCameraState"
+        };
+
+        // Получаем поля с атрибутом SerializeField или публичные поля без HideInInspector
+        foreach (FieldInfo field in component.GetType().GetFields(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance))
         {
             try
             {
-                var value = field.GetValue(component);
-                properties[field.Name] = SerializeValue(value);
+                // Пропускаем скрытые системные свойства
+                if (hiddenProperties.Contains(field.Name))
+                    continue;
+
+                bool shouldInclude = false;
+
+                // Включаем публичные поля, если они не помечены как HideInInspector
+                if (field.IsPublic)
+                {
+                    shouldInclude = !field.IsDefined(typeof(HideInInspector), false);
+                }
+                // Включаем приватные поля с атрибутом SerializeField
+                else
+                {
+                    shouldInclude = field.IsDefined(typeof(SerializeField), false);
+                }
+
+                // Специальная обработка для Transform - оставляем только основные редактируемые поля
+                if (component is Transform)
+                {
+                    var allowedTransformFields = new HashSet<string> 
+                    { 
+                        "position", "localPosition", "rotation", "localRotation", 
+                        "eulerAngles", "localEulerAngles", "localScale" 
+                    };
+                    shouldInclude = shouldInclude && allowedTransformFields.Contains(field.Name);
+                }
+
+                if (shouldInclude)
+                {
+                    var value = field.GetValue(component);
+                    properties[field.Name] = SerializeValue(value);
+                }
             }
             catch { }
         }
 
+        // Получаем свойства, которые видны в Inspector
         foreach (PropertyInfo prop in component.GetType().GetProperties(BindingFlags.Public | BindingFlags.Instance))
         {
             if (prop.CanRead && prop.GetIndexParameters().Length == 0)
             {
                 try
                 {
-                    var value = prop.GetValue(component);
-                    properties[prop.Name] = SerializeValue(value);
+                    // Пропускаем скрытые системные свойства
+                    if (hiddenProperties.Contains(prop.Name))
+                        continue;
+
+                    // Включаем только свойства, которые не помечены как HideInInspector
+                    if (!prop.IsDefined(typeof(HideInInspector), false))
+                    {
+                        // Специальная обработка для Transform - оставляем только основные редактируемые свойства
+                        if (component is Transform)
+                        {
+                            var allowedTransformProps = new HashSet<string> 
+                            { 
+                                "position", "localPosition", "rotation", "localRotation", 
+                                "eulerAngles", "localEulerAngles", "localScale" 
+                            };
+                            
+                            if (allowedTransformProps.Contains(prop.Name))
+                            {
+                                var value = prop.GetValue(component);
+                                properties[prop.Name] = SerializeValue(value);
+                            }
+                        }
+                        else
+                        {
+                            var value = prop.GetValue(component);
+                            properties[prop.Name] = SerializeValue(value);
+                        }
+                    }
                 }
                 catch { }
             }
