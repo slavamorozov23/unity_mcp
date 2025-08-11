@@ -3,16 +3,21 @@ import json
 from typing import Dict, List, Optional, Any
 
 class UnitySceneAPI:
-    def __init__(self, host: str = "localhost", port: int = 8081):
+    def __init__(self, host: str = "localhost", port: int = 8080):
         self.base_url = f"http://{host}:{port}"
         
     def get_scene_hierarchy(self) -> Optional[Dict]:
         try:
             response = requests.get(f"{self.base_url}/scene")
             response.raise_for_status()
-            return response.json()
+            result = response.json()
+            return result
         except requests.exceptions.RequestException as e:
             print(f"Error getting scene hierarchy: {e}")
+            return None
+        except json.JSONDecodeError as e:
+            print(f"Error parsing JSON response: {e}")
+            print(f"Response content: {response.text}")
             return None
     
     def open_scene(self, scene_path: str) -> bool:
@@ -26,7 +31,7 @@ class UnitySceneAPI:
             print(f"Error opening scene: {e}")
             return False
     
-    def get_build_scenes(self) -> Optional[List[Dict]]:
+    def get_build_scenes(self) -> Optional[Dict]:
         try:
             response = requests.get(f"{self.base_url}/build/scenes")
             response.raise_for_status()
@@ -46,10 +51,10 @@ class UnitySceneAPI:
             print(f"Error adding scene to build: {e}")
             return False
     
-    def remove_scene_from_build(self, scene_identifier: str) -> bool:
+    def remove_scene_from_build(self, scene_path: str) -> bool:
         try:
             response = requests.delete(f"{self.base_url}/build/scenes/remove", 
-                                     json={"sceneIdentifier": scene_identifier})
+                                     json={"scenePath": scene_path})
             response.raise_for_status()
             result = response.json()
             return result.get("success", False)
@@ -150,34 +155,74 @@ class UnitySceneAPI:
         
         paths = []
         
-        def search_recursive(obj_data):
+        def search_recursive(obj_data, current_path=""):
             if name.lower() in obj_data["name"].lower():
                 paths.append(obj_data["path"])
             
             for child in obj_data.get("children", []):
-                search_recursive(child)
+                search_recursive(child, obj_data["path"])
         
         for root_obj in hierarchy.get("rootObjects", []):
             search_recursive(root_obj)
         
         return paths
     
-    def print_hierarchy(self, obj: Dict = None, level: int = 0):
-        if obj is None:
+    def print_hierarchy(self, obj: Dict = None, level: int = 0, data: Dict = None):
+        if data is None:
             data = self.get_scene_hierarchy()
             if data is None:
                 print("Failed to get scene hierarchy")
                 return
-            print(f"Scene: {data['sceneName']} ({data['scenePath']})")
-            for root_obj in data['rootObjects']:
+            
+            if 'error' in data:
+                print(f"Error getting scene hierarchy: {data['error']}")
+                return
+            
+            scene_name = data.get('sceneName', 'Unknown Scene')
+            scene_path = data.get('scenePath', 'Unknown Path')
+            print(f"Scene: {scene_name} ({scene_path})")
+            
+            root_objects = data.get('rootObjects', [])
+            if not root_objects:
+                print("No root objects found in scene")
+                return
+                
+            for root_obj in root_objects:
                 self.print_hierarchy(root_obj, 0)
             return
         
         indent = "  " * level
-        print(f"{indent}{obj['name']} (Path: {obj['path']}, Active: {obj['active']})")
+        obj_name = obj.get('name', 'Unknown')
+        obj_path = obj.get('path', 'Unknown')
+        obj_active = obj.get('active', False)
+        print(f"{indent}{obj_name} (Path: {obj_path}, Active: {obj_active})")
         
-        for child in obj['children']:
+        children = obj.get('children', [])
+        for child in children:
             self.print_hierarchy(child, level + 1)
+    
+    def print_build_scenes(self):
+        build_data = self.get_build_scenes()
+        if not build_data:
+            print("Failed to get build scenes")
+            return
+        
+        if 'error' in build_data:
+            print(f"Error getting build scenes: {build_data['error']}")
+            return
+        
+        scenes = build_data.get("scenes", [])
+        print("Scenes in Build Settings:")
+        if not scenes:
+            print("  No scenes in build settings")
+            return
+            
+        for scene in scenes:
+            status = "enabled" if scene.get("enabled", False) else "disabled"
+            scene_path = scene.get("path", "Unknown")
+            scene_name = scene_path.split('/')[-1].replace('.unity', '') if scene_path != "Unknown" else "Unknown"
+            scene_index = scene.get("index", "?")
+            print(f"  {scene_index}: {scene_name} - {scene_path} ({status})")
     
     def print_object_info(self, object_path: str):
         components_data = self.get_object_components(object_path)
@@ -193,29 +238,20 @@ class UnitySceneAPI:
             for prop_name, prop_value in comp.get("properties", {}).items():
                 print(f"    {prop_name}: {prop_value}")
 
-    def print_build_scenes(self):
-        scenes = self.get_build_scenes()
-        if not scenes:
-            print("No scenes in build or failed to get build scenes")
-            return
-        
-        print("Scenes in Build Settings:")
-        if isinstance(scenes, dict) and 'scenes' in scenes:
-            scenes = scenes['scenes']
-        
-        for i, scene in enumerate(scenes):
-            if isinstance(scene, dict):
-                name = scene.get('name', 'Unknown')
-                path = scene.get('path', 'Unknown')
-                enabled = scene.get('enabled', False)
-                print(f"  {i}: {name} - {path} {'(enabled)' if enabled else '(disabled)'}")
-            else:
-                print(f"  {i}: {scene}")
-
 def example_workflow():
     unity = UnitySceneAPI()
     
     print("=== Unity Scene Management Example ===")
+    
+    print("Testing connection to Unity API server...")
+    try:
+        response = requests.get(f"{unity.base_url}/scene", timeout=5)
+        print(f"Connection successful! Status: {response.status_code}")
+    except requests.exceptions.RequestException as e:
+        print(f"Failed to connect to Unity API server at {unity.base_url}")
+        print(f"Error: {e}")
+        print("Make sure Unity Scene API Server is running in Unity Editor")
+        return
     
     print("\n1. Getting current scene hierarchy:")
     unity.print_hierarchy()
@@ -266,8 +302,9 @@ def build_scenes_example():
     unity.print_build_scenes()
     
     print("\n2. Adding scene to build (if exists):")
-    if unity.add_scene_to_build("Assets/Scenes/TestScene.unity"):
-        print("Scene added to build")
+    test_scene_path = "Assets/Scenes/TestScene.unity"
+    if unity.add_scene_to_build(test_scene_path):
+        print(f"Scene added to build: {test_scene_path}")
     else:
         print("Failed to add scene to build")
     
@@ -275,8 +312,8 @@ def build_scenes_example():
     unity.print_build_scenes()
     
     print("\n4. Removing scene from build:")
-    if unity.remove_scene_from_build("TestScene"):
-        print("Scene removed from build")
+    if unity.remove_scene_from_build(test_scene_path):
+        print(f"Scene removed from build: {test_scene_path}")
     else:
         print("Failed to remove scene from build")
     
@@ -292,9 +329,21 @@ def complex_example():
     child1_path = unity.create_object("Child1", parent_path)
     child2_path = unity.create_object("Child2", parent_path)
     
-    unity.add_component(child1_path, "MeshRenderer")
-    unity.add_component(child1_path, "BoxCollider")
-    unity.add_component(child2_path, "Light")
+    print("Adding components...")
+    if unity.add_component(child1_path, "MeshRenderer"):
+        print("MeshRenderer added to Child1")
+    else:
+        print("MeshRenderer already exists or failed to add to Child1")
+        
+    if unity.add_component(child1_path, "BoxCollider"):
+        print("BoxCollider added to Child1")
+    else:
+        print("BoxCollider already exists or failed to add to Child1")
+        
+    if unity.add_component(child2_path, "Light"):
+        print("Light added to Child2")
+    else:
+        print("Light already exists or failed to add to Child2")
     
     unity.move_object(child1_path, 2, 0, 0)
     unity.move_object(child2_path, -2, 0, 0)

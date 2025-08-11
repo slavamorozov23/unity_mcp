@@ -10,8 +10,6 @@ using System.Collections.Generic;
 using System.Linq;
 using System;
 using System.Reflection;
-using System.Collections.Concurrent;
-using System.Threading.Tasks;
 
 public class UnitySceneAPIWindow : EditorWindow
 {
@@ -19,18 +17,11 @@ public class UnitySceneAPIWindow : EditorWindow
     private Thread httpListenerThread;
     private bool isRunning = false;
     private int port = 8080;
-    private static UnitySceneAPIWindow instance;
 
     [MenuItem("Tools/Scene API Server")]
     public static void ShowWindow()
     {
         GetWindow<UnitySceneAPIWindow>("Scene API Server");
-    }
-
-    void OnEnable()
-    {
-        instance = this;
-        MainThreadDispatcher.Initialize();
     }
 
     void OnGUI()
@@ -69,13 +60,10 @@ public class UnitySceneAPIWindow : EditorWindow
         }
     }
 
-    void Update()
-    {
-        MainThreadDispatcher.ProcessQueue();
-    }
-
     void StartServer()
     {
+        MainThreadDispatcher.Initialize();
+
         httpListener = new HttpListener();
         httpListener.Prefixes.Add($"http://localhost:{port}/");
         httpListener.Start();
@@ -102,6 +90,8 @@ public class UnitySceneAPIWindow : EditorWindow
 
         isRunning = false;
         Debug.Log("Scene API Server stopped");
+
+        MainThreadDispatcher.Cleanup();
     }
 
     void OnDestroy()
@@ -116,7 +106,7 @@ public class UnitySceneAPIWindow : EditorWindow
             try
             {
                 HttpListenerContext context = httpListener.GetContext();
-                Task.Run(() => ProcessAsync(context));
+                MainThreadDispatcher.Enqueue(() => Process(context));
             }
             catch (System.Exception ex)
             {
@@ -128,7 +118,7 @@ public class UnitySceneAPIWindow : EditorWindow
         }
     }
 
-    private async void ProcessAsync(HttpListenerContext context)
+    private void Process(HttpListenerContext context)
     {
         string response = "";
         string path = context.Request.Url.AbsolutePath;
@@ -136,7 +126,45 @@ public class UnitySceneAPIWindow : EditorWindow
 
         try
         {
-            response = await ProcessRequest(method, path, context);
+            switch ($"{method} {path}")
+            {
+                case "GET /scene":
+                    response = GetSceneHierarchy();
+                    break;
+                case "POST /scene/open":
+                    response = OpenScene(context);
+                    break;
+                case "GET /build/scenes":
+                    response = GetBuildScenes();
+                    break;
+                case "POST /build/scenes/add":
+                    response = AddSceneToBuild(context);
+                    break;
+                case "DELETE /build/scenes/remove":
+                    response = RemoveSceneFromBuild(context);
+                    break;
+                case "POST /objects/create":
+                    response = CreateObject(context);
+                    break;
+                case "DELETE /objects/delete":
+                    response = DeleteObject(context);
+                    break;
+                case "GET /objects/components":
+                    response = GetObjectComponents(context);
+                    break;
+                case "POST /objects/components/add":
+                    response = AddComponent(context);
+                    break;
+                case "PUT /objects/components/modify":
+                    response = ModifyComponent(context);
+                    break;
+                case "DELETE /objects/components/remove":
+                    response = RemoveComponent(context);
+                    break;
+                default:
+                    response = JsonConvert.SerializeObject(new { error = "Endpoint not found" });
+                    break;
+            }
         }
         catch (System.Exception ex)
         {
@@ -151,37 +179,6 @@ public class UnitySceneAPIWindow : EditorWindow
         context.Response.OutputStream.Close();
     }
 
-    private async Task<string> ProcessRequest(string method, string path, HttpListenerContext context)
-    {
-        switch ($"{method} {path}")
-        {
-            case "GET /scene":
-                return await MainThreadDispatcher.ExecuteAsync(() => GetSceneHierarchy());
-            case "POST /scene/open":
-                return await MainThreadDispatcher.ExecuteAsync(() => OpenScene(context));
-            case "GET /build/scenes":
-                return await MainThreadDispatcher.ExecuteAsync(() => GetBuildScenes());
-            case "POST /build/scenes/add":
-                return await MainThreadDispatcher.ExecuteAsync(() => AddSceneToBuild(context));
-            case "DELETE /build/scenes/remove":
-                return await MainThreadDispatcher.ExecuteAsync(() => RemoveSceneFromBuild(context));
-            case "POST /objects/create":
-                return await MainThreadDispatcher.ExecuteAsync(() => CreateObject(context));
-            case "DELETE /objects/delete":
-                return await MainThreadDispatcher.ExecuteAsync(() => DeleteObject(context));
-            case "GET /objects/components":
-                return await MainThreadDispatcher.ExecuteAsync(() => GetObjectComponents(context));
-            case "POST /objects/components/add":
-                return await MainThreadDispatcher.ExecuteAsync(() => AddComponent(context));
-            case "PUT /objects/components/modify":
-                return await MainThreadDispatcher.ExecuteAsync(() => ModifyComponent(context));
-            case "DELETE /objects/components/remove":
-                return await MainThreadDispatcher.ExecuteAsync(() => RemoveComponent(context));
-            default:
-                return JsonConvert.SerializeObject(new { error = "Endpoint not found" });
-        }
-    }
-
     private string GetRequestBody(HttpListenerContext context)
     {
         using (StreamReader reader = new StreamReader(context.Request.InputStream))
@@ -192,23 +189,58 @@ public class UnitySceneAPIWindow : EditorWindow
 
     private string GetSceneHierarchy()
     {
-        var sceneData = new
+        try
         {
-            sceneName = UnityEngine.SceneManagement.SceneManager.GetActiveScene().name,
-            scenePath = UnityEngine.SceneManagement.SceneManager.GetActiveScene().path,
-            rootObjects = GetRootObjectsData()
-        };
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (!activeScene.IsValid())
+            {
+                return JsonConvert.SerializeObject(new { error = "No active scene found" });
+            }
 
-        return JsonConvert.SerializeObject(sceneData, Formatting.Indented);
+            var sceneData = new
+            {
+                sceneName = activeScene.name,
+                scenePath = activeScene.path,
+                rootObjects = GetRootObjectsData()
+            };
+
+            return JsonConvert.SerializeObject(sceneData, Formatting.Indented);
+        }
+        catch (System.Exception ex)
+        {
+            return JsonConvert.SerializeObject(new { error = $"Error getting scene hierarchy: {ex.Message}" });
+        }
     }
 
     private List<object> GetRootObjectsData()
     {
         var rootObjects = new List<object>();
 
-        foreach (GameObject rootGO in UnityEngine.SceneManagement.SceneManager.GetActiveScene().GetRootGameObjects())
+        try
         {
-            rootObjects.Add(GetGameObjectData(rootGO, ""));
+            var activeScene = UnityEngine.SceneManagement.SceneManager.GetActiveScene();
+            if (!activeScene.IsValid())
+            {
+                return rootObjects;
+            }
+
+            var sceneRootObjects = activeScene.GetRootGameObjects();
+            if (sceneRootObjects == null)
+            {
+                return rootObjects;
+            }
+
+            foreach (GameObject rootGO in sceneRootObjects)
+            {
+                if (rootGO != null)
+                {
+                    rootObjects.Add(GetGameObjectData(rootGO, ""));
+                }
+            }
+        }
+        catch (System.Exception ex)
+        {
+            Debug.LogError($"Error getting root objects: {ex.Message}");
         }
 
         return rootObjects;
@@ -238,6 +270,61 @@ public class UnitySceneAPIWindow : EditorWindow
             components = go.GetComponents<Component>().Select(c => c.GetType().Name).ToArray(),
             children = children
         };
+    }
+
+    private string GetBuildScenes()
+    {
+        var buildScenes = EditorBuildSettings.scenes.Select((scene, index) => new
+        {
+            index = index,
+            path = scene.path,
+            enabled = scene.enabled,
+            guid = scene.guid.ToString()
+        }).ToArray();
+
+        return JsonConvert.SerializeObject(new { scenes = buildScenes }, Formatting.Indented);
+    }
+
+    private string AddSceneToBuild(HttpListenerContext context)
+    {
+        var data = JsonConvert.DeserializeObject<dynamic>(GetRequestBody(context));
+        string scenePath = data.scenePath;
+
+        if (!File.Exists(scenePath))
+        {
+            return JsonConvert.SerializeObject(new { success = false, message = "Scene file not found" });
+        }
+
+        var scenes = EditorBuildSettings.scenes.ToList();
+
+        if (scenes.Any(s => s.path == scenePath))
+        {
+            return JsonConvert.SerializeObject(new { success = false, message = "Scene already in build settings" });
+        }
+
+        scenes.Add(new EditorBuildSettingsScene(scenePath, true));
+        EditorBuildSettings.scenes = scenes.ToArray();
+
+        return JsonConvert.SerializeObject(new { success = true, message = $"Scene added to build: {scenePath}" });
+    }
+
+    private string RemoveSceneFromBuild(HttpListenerContext context)
+    {
+        var data = JsonConvert.DeserializeObject<dynamic>(GetRequestBody(context));
+        string scenePath = data.scenePath;
+
+        var scenes = EditorBuildSettings.scenes.ToList();
+        var sceneToRemove = scenes.FirstOrDefault(s => s.path == scenePath);
+
+        if (sceneToRemove.path == null)
+        {
+            return JsonConvert.SerializeObject(new { success = false, message = "Scene not found in build settings" });
+        }
+
+        scenes.Remove(sceneToRemove);
+        EditorBuildSettings.scenes = scenes.ToArray();
+
+        return JsonConvert.SerializeObject(new { success = true, message = $"Scene removed from build: {scenePath}" });
     }
 
     private string OpenScene(HttpListenerContext context)
@@ -391,8 +478,20 @@ public class UnitySceneAPIWindow : EditorWindow
             return JsonConvert.SerializeObject(new { success = false, message = "Component type not found" });
         }
 
-        Component comp = obj.AddComponent(type);
-        return JsonConvert.SerializeObject(new { success = true, message = $"Component added: {componentType}" });
+        if (obj.GetComponent(type) != null)
+        {
+            return JsonConvert.SerializeObject(new { success = false, message = $"Component {componentType} already exists on object" });
+        }
+
+        try
+        {
+            Component comp = obj.AddComponent(type);
+            return JsonConvert.SerializeObject(new { success = true, message = $"Component added: {componentType}" });
+        }
+        catch (System.Exception ex)
+        {
+            return JsonConvert.SerializeObject(new { success = false, message = $"Failed to add component: {ex.Message}" });
+        }
     }
 
     private string ModifyComponent(HttpListenerContext context)
@@ -489,80 +588,6 @@ public class UnitySceneAPIWindow : EditorWindow
         return JsonConvert.SerializeObject(new { success = true, message = $"Component removed: {componentType}" });
     }
 
-    private string GetBuildScenes()
-    {
-        var buildScenes = EditorBuildSettings.scenes;
-        var sceneList = buildScenes.Select((scene, index) => new
-        {
-            index = index,
-            name = System.IO.Path.GetFileNameWithoutExtension(scene.path),
-            path = scene.path,
-            enabled = scene.enabled,
-            guid = scene.guid.ToString()
-        }).ToArray();
-
-        return JsonConvert.SerializeObject(new { scenes = sceneList }, Formatting.Indented);
-    }
-
-    private string AddSceneToBuild(HttpListenerContext context)
-    {
-        var data = JsonConvert.DeserializeObject<dynamic>(GetRequestBody(context));
-        string scenePath = data.scenePath;
-
-        if (!System.IO.File.Exists(scenePath))
-        {
-            return JsonConvert.SerializeObject(new { success = false, message = "Scene file not found" });
-        }
-
-        var buildScenes = EditorBuildSettings.scenes.ToList();
-
-        if (buildScenes.Any(s => s.path == scenePath))
-        {
-            return JsonConvert.SerializeObject(new { success = false, message = "Scene already in build settings" });
-        }
-
-        var newScene = new EditorBuildSettingsScene(scenePath, true);
-        buildScenes.Add(newScene);
-
-        EditorBuildSettings.scenes = buildScenes.ToArray();
-
-        return JsonConvert.SerializeObject(new
-        {
-            success = true,
-            message = $"Scene added to build: {scenePath}",
-            sceneName = System.IO.Path.GetFileNameWithoutExtension(scenePath)
-        });
-    }
-
-    private string RemoveSceneFromBuild(HttpListenerContext context)
-    {
-        var data = JsonConvert.DeserializeObject<dynamic>(GetRequestBody(context));
-        string sceneIdentifier = data.sceneIdentifier;
-
-        var buildScenes = EditorBuildSettings.scenes.ToList();
-        EditorBuildSettingsScene sceneToRemove = null;
-
-        sceneToRemove = buildScenes.FirstOrDefault(s =>
-            s.path == sceneIdentifier ||
-            System.IO.Path.GetFileNameWithoutExtension(s.path) == sceneIdentifier ||
-            s.path.EndsWith(sceneIdentifier));
-
-        if (sceneToRemove.path == null)
-        {
-            return JsonConvert.SerializeObject(new { success = false, message = "Scene not found in build settings" });
-        }
-
-        buildScenes.Remove(sceneToRemove);
-        EditorBuildSettings.scenes = buildScenes.ToArray();
-
-        return JsonConvert.SerializeObject(new
-        {
-            success = true,
-            message = $"Scene removed from build: {sceneToRemove.path}",
-            sceneName = System.IO.Path.GetFileNameWithoutExtension(sceneToRemove.path)
-        });
-    }
-
     private GameObject FindGameObjectByPath(string path)
     {
         if (string.IsNullOrEmpty(path)) return null;
@@ -594,69 +619,54 @@ public class UnitySceneAPIWindow : EditorWindow
 
 public class MainThreadDispatcher
 {
-    private static readonly ConcurrentQueue<System.Action> actions = new ConcurrentQueue<System.Action>();
-    private static bool initialized = false;
+    private static readonly Queue<System.Action> actions = new Queue<System.Action>();
+    private static bool isInitialized = false;
 
     public static void Initialize()
     {
-        initialized = true;
+        if (!isInitialized)
+        {
+            EditorApplication.update += Update;
+            isInitialized = true;
+        }
+    }
+
+    public static void Cleanup()
+    {
+        if (isInitialized)
+        {
+            EditorApplication.update -= Update;
+            isInitialized = false;
+            lock (actions)
+            {
+                actions.Clear();
+            }
+        }
     }
 
     public static void Enqueue(System.Action action)
     {
-        if (!initialized) return;
-        actions.Enqueue(action);
-    }
-
-    public static void ProcessQueue()
-    {
-        if (!initialized) return;
-
-        while (actions.TryDequeue(out System.Action action))
+        lock (actions)
         {
-            try
-            {
-                action.Invoke();
-            }
-            catch (System.Exception ex)
-            {
-                Debug.LogError($"Main thread action error: {ex.Message}");
-            }
+            actions.Enqueue(action);
         }
     }
 
-    public static async Task<T> ExecuteAsync<T>(System.Func<T> function)
+    private static void Update()
     {
-        if (!initialized) throw new System.Exception("MainThreadDispatcher not initialized");
-
-        T result = default(T);
-        bool completed = false;
-        System.Exception exception = null;
-
-        Enqueue(() =>
+        lock (actions)
         {
-            try
+            while (actions.Count > 0)
             {
-                result = function();
+                try
+                {
+                    actions.Dequeue().Invoke();
+                }
+                catch (System.Exception ex)
+                {
+                    Debug.LogError($"Error executing main thread action: {ex.Message}");
+                }
             }
-            catch (System.Exception ex)
-            {
-                exception = ex;
-            }
-            finally
-            {
-                completed = true;
-            }
-        });
-
-        while (!completed)
-        {
-            await Task.Delay(1);
         }
-
-        if (exception != null)
-            throw exception;
-
-        return result;
     }
 }
