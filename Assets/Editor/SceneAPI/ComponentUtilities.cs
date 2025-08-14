@@ -50,9 +50,32 @@ namespace SceneAPI
                 {
                     SetSerializedPropertyValue(serializedProperty, propertyValue);
                 }
+                else
+                {
+                    Debug.LogWarning($"Property '{propertyName}' not found on component {component.GetType().Name}. Available properties: {GetAvailablePropertyNames(component)}");
+                }
             }
 
             serializedObject.ApplyModifiedProperties();
+        }
+        
+        private static string GetAvailablePropertyNames(Component component)
+        {
+            var propertyNames = new List<string>();
+            SerializedObject serializedObject = new SerializedObject(component);
+            SerializedProperty property = serializedObject.GetIterator();
+            
+            bool enterChildren = true;
+            while (property.NextVisible(enterChildren))
+            {
+                enterChildren = false;
+                if (property.name != "m_Script")
+                {
+                    propertyNames.Add(property.name);
+                }
+            }
+            
+            return string.Join(", ", propertyNames);
         }
 
         private static object GetSerializedPropertyValue(SerializedProperty property)
@@ -158,8 +181,18 @@ namespace SceneAPI
                         property.vector2Value = new Vector2((float)vec2Data.x, (float)vec2Data.y);
                         break;
                     case SerializedPropertyType.Vector3:
-                        var vec3Data = JsonConvert.DeserializeObject<dynamic>(value.ToString());
-                        property.vector3Value = new Vector3((float)vec3Data.x, (float)vec3Data.y, (float)vec3Data.z);
+                        if (value is Newtonsoft.Json.Linq.JObject jObj)
+                        {
+                            float x = jObj["x"]?.ToObject<float>() ?? 0f;
+                            float y = jObj["y"]?.ToObject<float>() ?? 0f;
+                            float z = jObj["z"]?.ToObject<float>() ?? 0f;
+                            property.vector3Value = new Vector3(x, y, z);
+                        }
+                        else
+                        {
+                            var vec3Data = JsonConvert.DeserializeObject<dynamic>(value.ToString());
+                            property.vector3Value = new Vector3((float)vec3Data.x, (float)vec3Data.y, (float)vec3Data.z);
+                        }
                         break;
                     case SerializedPropertyType.Vector4:
                         var vec4Data = JsonConvert.DeserializeObject<dynamic>(value.ToString());

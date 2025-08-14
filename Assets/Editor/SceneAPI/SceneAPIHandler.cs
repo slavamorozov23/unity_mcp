@@ -1,57 +1,35 @@
 using System.Net;
 using Newtonsoft.Json;
-using SceneAPI.Handlers;
+using SceneAPI.Modules;
 
 namespace SceneAPI
 {
     public class SceneAPIHandler
     {
-        private readonly SceneHandler sceneHandler;
-        private readonly GameObjectHandler gameObjectHandler;
-        private readonly ComponentHandler componentHandler;
-
         public SceneAPIHandler()
         {
-            sceneHandler = new SceneHandler();
-            gameObjectHandler = new GameObjectHandler();
-            componentHandler = new ComponentHandler();
         }
 
         public string HandleRequest(string method, string path, HttpListenerContext context)
         {
-            switch ($"{method} {path}")
+            return $"{method} {path}" switch
             {
                 // Scene endpoints
-                case "GET /scene":
-                    return sceneHandler.GetSceneHierarchy();
-                case "POST /scene/open":
-                    return sceneHandler.OpenScene(context);
-                case "GET /build/scenes":
-                    return sceneHandler.GetBuildScenes();
-                case "POST /build/scenes/add":
-                    return sceneHandler.AddSceneToBuild(context);
-                case "DELETE /build/scenes/remove":
-                    return sceneHandler.RemoveSceneFromBuild(context);
-                
+                "GET /scene" => GetHierarchyModule.Execute(),
+                "POST /scene/open" => SceneManagementModule.OpenScene(context),
+                "GET /build/scenes" => SceneManagementModule.GetBuildScenes(),
+                "POST /build/scenes/add" => SceneManagementModule.AddSceneToBuild(context),
+                "DELETE /build/scenes/remove" => SceneManagementModule.RemoveSceneFromBuild(context),
                 // GameObject endpoints
-                case "POST /objects/create":
-                    return gameObjectHandler.CreateObject(context);
-                case "DELETE /objects/delete":
-                    return gameObjectHandler.DeleteObject(context);
-                
+                "POST /objects/create" => CreateObjectModule.Execute(context),
+                "DELETE /objects/delete" => DeleteObjectModule.Execute(context),
                 // Component endpoints
-                case "GET /objects/components":
-                    return componentHandler.GetObjectComponents(context);
-                case "POST /objects/components/add":
-                    return componentHandler.AddComponent(context);
-                case "PUT /objects/components/modify":
-                    return componentHandler.ModifyComponent(context);
-                case "DELETE /objects/components/remove":
-                    return componentHandler.RemoveComponent(context);
-                
-                default:
-                    return JsonConvert.SerializeObject(new { error = "Endpoint not found" });
-            }
+                "GET /objects/components" => GetComponentsModule.Execute(context),
+                "POST /objects/components/add" => AddComponentModule.Execute(context),
+                "PUT /objects/components/modify" => ModifyComponentModule.Execute(context),
+                "DELETE /objects/components/remove" => RemoveComponentModule.Execute(context),
+                _ => JsonConvert.SerializeObject(new { error = "Endpoint not found" }),
+            };
         }
     }
 }
