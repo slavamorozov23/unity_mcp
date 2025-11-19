@@ -65,10 +65,13 @@ class UnityAPITesterGUI:
             ("8. Удалить Rigidbody с TestObject", self.test_remove_component),
             ("9. Удалить TestObject", self.test_delete_object),
             ("10. Фильтрованная иерархия", self.test_filtered_hierarchy),
+            ("11. NLP поиск (query='camera')", self.test_nlp_search),
+            ("12. Object Picker (для 'Main Camera')", self.test_object_picker),
+            ("13. Варианты параметра Transform.m_LocalPosition", self.test_picker_component_variants),
         ]
         
         for i, (text, command) in enumerate(tests):
-            button = ttk.Button(parent, text=text, command=command, width=30)
+            button = ttk.Button(parent, text=text, command=lambda t=text, c=command: self.execute_test(t, c), width=30)
             button.grid(row=i, column=0, pady=2, sticky=tk.W)
             
         # Кнопка для запуска всех тестов
@@ -168,6 +171,32 @@ class UnityAPITesterGUI:
         request = {
             "action": "get_hierarchy",
             "params": {"from_path": "Enemies"}
+        }
+        return self.unity.execute_command(request)
+        
+    def test_nlp_search(self):
+        request = {
+            "action": "nlp_search",
+            "params": {"query": "camera"}
+        }
+        return self.unity.execute_command(request)
+        
+    def test_object_picker(self):
+        request = {
+            "action": "object_picker_options",
+            "params": {"object_path": "Main Camera"}
+        }
+        return self.unity.execute_command(request)
+        
+    def test_picker_component_variants(self):
+        request = {
+            "action": "picker_component_variants",
+            "params": {
+                "object_path": "Main Camera",
+                "component_type": "Transform",
+                "param_name": "m_LocalPosition",
+                "query": "0"
+            }
         }
         return self.unity.execute_command(request)
         

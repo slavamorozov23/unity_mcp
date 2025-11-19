@@ -1,24 +1,14 @@
 import json
 from typing import Dict, List, Optional, Any
 
-from modules import (
-    GetHierarchyModule,
-    GetComponentsModule,
-    CreateObjectModule,
-    DeleteObjectModule,
-    ModifyComponentModule,
-    AddComponentModule,
-    RemoveComponentModule,
-    FindObjectsModule,
-    SceneManagementModule,
-    LoggingModule
-)
+# Импортируем все модули из пакета
+from modules import *
 
 class UnitySceneAPI:
     def __init__(self, host: str = "localhost", port: int = 8080):
         self.base_url = f"http://{host}:{port}"
-        
-        # Инициализация модулей
+
+        # --- Core / Objects ---
         self.hierarchy_module = GetHierarchyModule(self.base_url)
         self.components_module = GetComponentsModule(self.base_url)
         self.create_object_module = CreateObjectModule(self.base_url)
@@ -27,289 +17,259 @@ class UnitySceneAPI:
         self.add_component_module = AddComponentModule(self.base_url)
         self.remove_component_module = RemoveComponentModule(self.base_url)
         self.find_objects_module = FindObjectsModule(self.base_url)
+        self.move_object_module = MoveObjectModule(self.base_url)
+        self.reset_object_module = ResetObjectModule(self.base_url)
+        self.rename_object_module = RenameObjectModule(self.base_url)
+        self.set_active_module = SetObjectActiveModule(self.base_url)
+        
+        # --- Scene Management ---
         self.scene_management_module = SceneManagementModule(self.base_url)
+        
+        # --- Prefabs ---
+        self.create_object_from_prefab_module = CreateObjectFromPrefabModule(self.base_url)
+        self.save_object_as_prefab_module = SaveObjectAsPrefabModule(self.base_url)
+        self.instantiate_prefab_module = InstantiatePrefabModule(self.base_url)
+        self.get_prefabs_list_module = GetPrefabsListModule(self.base_url)
+
+        # --- Helpers / NLP ---
+        self.nlp_search_module = NLPSearchModule(self.base_url)
+        self.object_picker_module = ObjectPickerModule(self.base_url)
+        self.picker_component_variants_module = PickerComponentVariantsModule(self.base_url)
         self.logging_module = LoggingModule()
-    
-    # Методы для обратной совместимости
-    def get_scene_hierarchy(self) -> Optional[Dict]:
-        """Получает иерархию сцены"""
-        result = self.hierarchy_module.execute()
-        return result.get("data") if result.get("success") else {"error": result.get("error")}
-    
-    def get_object_components(self, object_path: str) -> Optional[Dict]:
-        """Получает компоненты объекта"""
-        result = self.components_module.execute(object_path)
-        return result.get("data", {}).get("components") if result.get("success") else {"error": result.get("error")}
-    
-    def create_object(self, name: str = "GameObject", parent_path: str = "") -> Dict:
-        """Создает новый объект"""
-        result = self.create_object_module.execute(name, parent_path)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def delete_object(self, object_path: str) -> Dict:
-        """Удаляет объект"""
-        result = self.delete_object_module.execute(object_path)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def modify_component(self, object_path: str, component_type: str, properties: Dict[str, Any]) -> Dict:
-        """Модифицирует компонент"""
-        result = self.modify_component_module.execute(object_path, component_type, properties)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def add_component(self, object_path: str, component_type: str) -> Dict:
-        """Добавляет компонент"""
-        result = self.add_component_module.execute(object_path, component_type)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def remove_component(self, object_path: str, component_type: str) -> Dict:
-        """Удаляет компонент"""
-        result = self.remove_component_module.execute(object_path, component_type)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def find_objects_by_name(self, name: str) -> Dict:
-        """Находит объекты по имени"""
-        result = self.find_objects_module.execute(name)
-        return result.get("data") if result.get("success") else {"error": result.get("error")}
-    
-    def open_scene(self, scene_path: str) -> Dict:
-        """Открывает сцену"""
-        result = self.scene_management_module.open_scene(scene_path)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def get_build_scenes(self) -> Optional[Dict]:
-        """Получает список сцен в билде"""
-        result = self.scene_management_module.get_build_scenes()
-        return result.get("data") if result.get("success") else {"error": result.get("error")}
-    
-    def add_scene_to_build(self, scene_path: str) -> Dict:
-        """Добавляет сцену в билд"""
-        result = self.scene_management_module.add_scene_to_build(scene_path)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    def remove_scene_from_build(self, scene_path: str) -> Dict:
-        """Удаляет сцену из билда"""
-        result = self.scene_management_module.remove_scene_from_build(scene_path)
-        return result.get("data") if result.get("success") else {"success": False, "error": result.get("error")}
-    
-    # Вспомогательные методы для трансформации
-    def move_object(self, object_path: str, x: float, y: float, z: float) -> Dict:
-        """Перемещает объект"""
-        return self.modify_component_module.move_object(object_path, x, y, z)
-    
-    def rotate_object(self, object_path: str, x: float, y: float, z: float, w: float) -> Dict:
-        """Поворачивает объект"""
-        return self.modify_component_module.rotate_object(object_path, x, y, z, w)
-    
-    def scale_object(self, object_path: str, x: float, y: float, z: float) -> Dict:
-        """Масштабирует объект"""
-        return self.modify_component_module.scale_object(object_path, x, y, z)
-    
-    # JSON-focused getters для совместимости с инструментами
-    def get_hierarchy_json(self) -> Optional[Dict]:
-        return self.get_scene_hierarchy()
-    
-    def get_build_scenes_json(self) -> Optional[Dict]:
-        return self.get_build_scenes()
-    
-    def get_object_info_json(self, object_path: str) -> Optional[Dict]:
-        return self.get_object_components(object_path)
-    
-    # Методы логирования
-    def get_log_file_path(self) -> str:
-        """Получить путь к лог-файлу"""
-        return self.logging_module.get_log_file_path()
-    
-    # Структурированные JSON методы
+
+        # --- Stage 1: Debug & Vision (Smart) ---
+        self.snapshot_module = GameViewSnapshotModule(self.base_url)
+        self.tilemap_snapshot_module = TilemapSnapshotModule(self.base_url)
+        self.get_logs_module = GetLogsModule(self.base_url)
+        self.search_logs_module = SearchLogsModule(self.base_url)
+        self.scene_status_module = GetSceneStatusModule(self.base_url)
+        self.play_control_module = PlayControlModule(self.base_url)
+
+        # --- Stage 2: Assets & Files ---
+        self.get_templates_module = GetCreationTemplatesModule(self.base_url)
+        self.create_template_module = CreateFromTemplateModule(self.base_url)
+        self.get_asset_info_module = GetAssetInfoModule(self.base_url)
+        self.modify_asset_module = ModifyAssetModule(self.base_url)
+        self.asset_picker_module = GetAssetPickerOptionsModule(self.base_url)
+
+        # --- Stage 3: Tilemaps ---
+        self.get_tilemaps_module = GetTilemapsModule(self.base_url)
+        self.paint_tile_module = PaintTileModule(self.base_url)
+        self.manage_tile_asset_module = ManageTileAssetModule(self.base_url)
+
+        # --- Stage 4: Animation & Input ---
+        self.get_anim_info_module = GetAnimInfoModule(self.base_url)
+        self.manage_anim_module = ManageAnimPropertyModule(self.base_url)
+        self.manage_input_module = ManageInputAxisModule(self.base_url)
+        self.get_input_constants_module = GetInputConstantsModule(self.base_url)
+
+    # ==========================================
+    # Основной диспетчер команд (Unified JSON Interface)
+    # ==========================================
     def execute_command(self, command: Dict) -> Dict:
         """
-        Выполняет структурированную команду и возвращает структурированный ответ
-        Формат запроса: {"action": "get_hierarchy|get_components|create_object|...", "params": {...}}
+        Единая точка входа для выполнения команд.
+        Принимает: {"action": "name", "params": {...}}
         """
         try:
             action = command.get("action")
             params = command.get("params", {})
             
+            # Логирование входящего запроса (опционально)
+            # self.logging_module.log_structured(command, {}) 
+
             result = None
-            
+
+            # --- Core: Objects ---
             if action == "get_hierarchy":
                 result = self.hierarchy_module.execute(params)
             elif action == "get_components":
-                object_path = params.get("object_path")
-                if not object_path:
-                    result = {"success": False, "action": action, "error": "object_path is required"}
-                else:
-                    result = self.components_module.execute(object_path)
+                result = self.components_module.execute(params.get("object_path", ""))
             elif action == "create_object":
-                name = params.get("name", "GameObject")
-                parent_path = params.get("parent_path", "")
-                result = self.create_object_module.execute(name, parent_path)
+                result = self.create_object_module.execute(params.get("name", "GameObject"), params.get("parent_path", ""))
             elif action == "delete_object":
-                object_path = params.get("object_path")
-                if not object_path:
-                    result = {"success": False, "action": action, "error": "object_path is required"}
-                else:
-                    result = self.delete_object_module.execute(object_path)
+                result = self.delete_object_module.execute(params.get("object_path", ""))
             elif action == "modify_component":
-                object_path = params.get("object_path")
-                component_type = params.get("component_type")
-                properties = params.get("properties", {})
-                
-                if not all([object_path, component_type]):
-                    result = {"success": False, "action": action, "error": "object_path and component_type are required"}
-                else:
-                    result = self.modify_component_module.execute(object_path, component_type, properties)
+                result = self.modify_component_module.execute(
+                    params.get("object_path", ""), 
+                    params.get("component_type", ""), 
+                    params.get("properties", {})
+                )
             elif action == "add_component":
-                object_path = params.get("object_path")
-                component_type = params.get("component_type")
-                
-                if not all([object_path, component_type]):
-                    result = {"success": False, "action": action, "error": "object_path and component_type are required"}
-                else:
-                    result = self.add_component_module.execute(object_path, component_type)
+                result = self.add_component_module.execute(params.get("object_path", ""), params.get("component_type", ""))
             elif action == "remove_component":
-                object_path = params.get("object_path")
-                component_type = params.get("component_type")
-                
-                if not all([object_path, component_type]):
-                    result = {"success": False, "action": action, "error": "object_path and component_type are required"}
-                else:
-                    result = self.remove_component_module.execute(object_path, component_type)
+                result = self.remove_component_module.execute(params.get("object_path", ""), params.get("component_type", ""))
             elif action == "find_objects":
-                name = params.get("name")
-                if not name:
-                    result = {"success": False, "action": action, "error": "name is required"}
-                else:
-                    result = self.find_objects_module.execute(name)
+                result = self.find_objects_module.execute(params.get("name", ""))
+            elif action == "move_object":
+                result = self.move_object_module.execute(
+                    params.get("source_path", ""), 
+                    params.get("target_parent_path", ""), 
+                    params.get("new_name", "")
+                )
+            elif action == "reset_object":
+                result = self.reset_object_module.execute(params.get("object_path", ""))
+            elif action == "rename_object":
+                result = self.rename_object_module.execute(params.get("path", ""), params.get("new_name", ""))
+            elif action == "set_active":
+                result = self.set_active_module.execute(params.get("path", ""), params.get("active", True))
+
+            # --- Core: Scenes ---
             elif action == "open_scene":
-                scene_path = params.get("scene_path")
-                if not scene_path:
-                    result = {"success": False, "action": action, "error": "scene_path is required"}
-                else:
-                    result = self.scene_management_module.open_scene(scene_path)
+                result = self.scene_management_module.open_scene(params.get("scene_path", ""))
             elif action == "get_build_scenes":
                 result = self.scene_management_module.get_build_scenes()
-            elif action == "add_scene_to_build":
-                scene_path = params.get("scene_path")
-                if not scene_path:
-                    result = {"success": False, "action": action, "error": "scene_path is required"}
-                else:
-                    result = self.scene_management_module.add_scene_to_build(scene_path)
-            elif action == "remove_scene_from_build":
-                scene_path = params.get("scene_path")
-                if not scene_path:
-                    result = {"success": False, "action": action, "error": "scene_path is required"}
-                else:
-                    result = self.scene_management_module.remove_scene_from_build(scene_path)
-            else:
-                result = {"success": False, "action": action, "error": f"Unknown action: {action}"}
             
-            # Логируем запрос и ответ
-            self.logging_module.log_structured(command, result)
+            # --- Core: Prefabs ---
+            elif action == "create_from_prefab":
+                result = self.create_object_from_prefab_module.execute(
+                    params.get("prefab_path", ""), 
+                    params.get("object_name", ""), 
+                    params.get("parent_path", "")
+                )
+            elif action == "save_as_prefab":
+                result = self.save_object_as_prefab_module.execute(
+                    params.get("object_path", ""), 
+                    params.get("prefab_name", ""), 
+                    params.get("target_folder", "Assets/Prefabs")
+                )
+            elif action == "get_prefabs":
+                result = self.get_prefabs_list_module.execute()
+
+            # --- Core: NLP & Pickers ---
+            elif action == "nlp_search":
+                result = self.nlp_search_module.execute(params.get("query", ""))
+            elif action == "object_picker_options":
+                result = self.object_picker_module.get_object_picker_options(params.get("object_path", ""))
+            elif action == "component_variants":
+                result = self.picker_component_variants_module.execute(
+                    params.get("object_path", ""),
+                    params.get("component_type", ""),
+                    params.get("param_name", ""),
+                    params.get("query", "")
+                )
+
+            # --- Vision & Debug (Smart) ---
+            elif action == "get_snapshot":
+                # "Умный" снимок с Raycast оптимизацией
+                result = self.snapshot_module.execute(
+                    target_paths=params.get("targetPaths", []),
+                    distance=params.get("distance", 10.0),
+                    width=params.get("width", 1280), 
+                    height=params.get("height", 720)
+                )
+            elif action == "get_tilemap_snapshot":
+                # "Умный" снимок тайлмапа с анализом наложения объектов и Z-координат
+                result = self.tilemap_snapshot_module.execute(
+                    tilemap_name=params.get("tilemap_name", ""),
+                    overlay_object_paths=params.get("overlayObjectPaths", []),
+                    center_x=params.get("center_x", 0), 
+                    center_y=params.get("center_y", 0),
+                    width=params.get("width", 20), 
+                    height=params.get("height", 20)
+                )
+            elif action == "get_logs":
+                result = self.get_logs_module.execute()
+            elif action == "search_logs":
+                result = self.search_logs_module.execute(params.get("query", ""), params.get("max_results", 100))
+            elif action == "scene_status":
+                result = self.scene_status_module.execute()
+            elif action == "scene_control":
+                result = self.play_control_module.execute(params.get("command", "stop"))
+
+            # --- Assets ---
+            elif action == "search_templates":
+                result = self.get_templates_module.execute(params.get("query", ""))
+            elif action == "create_asset":
+                result = self.create_template_module.execute(
+                    params.get("template_name", ""), 
+                    params.get("target_path", ""), 
+                    params.get("file_name", "")
+                )
+            elif action == "get_asset_info":
+                result = self.get_asset_info_module.execute(params.get("asset_path", ""))
+            elif action == "modify_asset":
+                result = self.modify_asset_module.execute(
+                    params.get("asset_path", ""),
+                    params.get("properties"),
+                    params.get("import_settings")
+                )
+            elif action == "asset_picker_options":
+                result = self.asset_picker_module.execute(
+                    params.get("asset_path", ""),
+                    params.get("property_name", "")
+                )
+
+            # --- Tilemaps ---
+            elif action == "get_tilemaps":
+                result = self.get_tilemaps_module.execute()
+            elif action == "paint_tile":
+                result = self.paint_tile_module.execute(
+                    params.get("tilemap_name", ""),
+                    params.get("tile_name", ""), # None/empty for erase
+                    params.get("x", 0),
+                    params.get("y", 0)
+                )
+            elif action == "manage_tile_asset":
+                if params.get("sub_action") == "create":
+                    result = self.manage_tile_asset_module.create_tile(
+                        params.get("tile_name", ""), params.get("sprite_path", "")
+                    )
+                else:
+                    result = self.manage_tile_asset_module.delete_tile(params.get("tile_name", ""))
+
+            # --- Animation & Input ---
+            elif action == "get_anim_info":
+                result = self.get_anim_info_module.execute(params.get("anim_path", ""), params.get("query", ""))
+            elif action == "modify_anim":
+                sub = params.get("sub_action")
+                if sub == "add_key":
+                    result = self.manage_anim_module.add_key(
+                        params.get("anim_path", ""), params.get("object_path", ""),
+                        params.get("component_type", ""), params.get("property_name", ""),
+                        params.get("time", 0.0), params.get("value", 0.0)
+                    )
+                elif sub == "remove_property":
+                    result = self.manage_anim_module.remove_property(
+                        params.get("anim_path", ""), params.get("object_path", ""),
+                        params.get("component_type", ""), params.get("property_name", "")
+                    )
+            elif action == "manage_input":
+                sub = params.get("sub_action")
+                if sub == "list":
+                    result = self.manage_input_module.list_axes()
+                elif sub == "delete":
+                    result = self.manage_input_module.delete_axis(params.get("name", ""))
+                elif sub == "create":
+                    result = self.manage_input_module.create_axis(
+                        params.get("name", ""), params.get("pos_btn", ""), params.get("neg_btn", ""),
+                        params.get("alt_pos", ""), params.get("alt_neg", ""),
+                        params.get("type", 0), params.get("axis", 0)
+                    )
+                elif sub == "constants":
+                    # Получение подсказанных констант (Axis, JoyNum и т.д.)
+                    result = self.get_input_constants_module.execute()
+
+            else:
+                result = {"success": False, "error": f"Unknown action: {action}"}
+
+            # Логируем результат
+            self.logging_module.log_structured(command, result if result else {})
             return result
-                
+
         except Exception as e:
-            result = {"success": False, "action": command.get("action", "unknown"), "error": str(e)}
-            self.logging_module.log_structured(command, result)
-            return result
+            err = {"success": False, "action": action, "error": str(e)}
+            self.logging_module.log_structured(command, err)
+            return err
 
-def wait_for_enter(message: str = "Нажмите Enter для продолжения..."):
-    """Ожидает нажатия Enter с настраиваемым сообщением"""
-    input(message)
-
-# Пример использования
-def main():
-    unity = UnitySceneAPI()
-    
-    print("=== Тест 1: Получение иерархии ===")
-    hierarchy_request = {"action": "get_hierarchy"}
-    hierarchy_response = unity.execute_command(hierarchy_request)
-    print(json.dumps(hierarchy_response, indent=2, ensure_ascii=False))
-    wait_for_enter()
-    
-    print("\n=== Тест 2: Получение компонентов ===")
-    components_request = {
-        "action": "get_components",
-        "params": {"object_path": "Main Camera"}
-    }
-    components_response = unity.execute_command(components_request)
-    print(json.dumps(components_response, indent=2, ensure_ascii=False))
-    wait_for_enter()
-    
-    print("\n=== Тест 3: Создание объекта ===")
-    create_request = {
-        "action": "create_object",
-        "params": {"name": "TestObject", "parent_path": ""}
-    }
-    create_response = unity.execute_command(create_request)
-    print(json.dumps(create_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Объект создан. Нажмите Enter для продолжения...")
-    
-    print("\n=== Тест 4: Поиск объектов ===")
-    find_request = {
-        "action": "find_objects",
-        "params": {"name": "Camera"}
-    }
-    find_response = unity.execute_command(find_request)
-    print(json.dumps(find_response, indent=2, ensure_ascii=False))
-    wait_for_enter()
-    
-    print("\n=== Тест 5: Добавление компонента ===")
-    add_component_request = {
-        "action": "add_component",
-        "params": {"object_path": "TestObject", "component_type": "Rigidbody"}
-    }
-    add_component_response = unity.execute_command(add_component_request)
-    print(json.dumps(add_component_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Компонент добавлен. Нажмите Enter для продолжения...")
-    
-    print("\n=== Тест 6: Модификация компонента ===")
-    modify_request = {
-        "action": "modify_component",
-        "params": {
-            "object_path": "TestObject",
-            "component_type": "Transform",
-            "properties": {"m_LocalPosition": {"x": 1.0, "y": 2.0, "z": 3.0}}
-        }
-    }
-    modify_response = unity.execute_command(modify_request)
-    print(json.dumps(modify_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Позиция объекта изменена. Нажмите Enter для продолжения...")
-    
-    print("\n=== Тест 7: Получение сцен в билде ===")
-    build_scenes_request = {"action": "get_build_scenes"}
-    build_scenes_response = unity.execute_command(build_scenes_request)
-    print(json.dumps(build_scenes_response, indent=2, ensure_ascii=False))
-    wait_for_enter()
-    
-    print("\n=== Тест 8: Удаление компонента ===")
-    remove_component_request = {
-        "action": "remove_component",
-        "params": {"object_path": "TestObject", "component_type": "Rigidbody"}
-    }
-    remove_component_response = unity.execute_command(remove_component_request)
-    print(json.dumps(remove_component_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Компонент удален. Нажмите Enter для очистки (удаления объекта)...")
-    
-    print("\n=== Тест 9: Удаление объекта ===")
-    delete_request = {
-        "action": "delete_object",
-        "params": {"object_path": "TestObject"}
-    }
-    delete_response = unity.execute_command(delete_request)
-    print(json.dumps(delete_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Объект удален. Нажмите Enter для продолжения...")
-    
-    print("\n=== Тест 10: Фильтрованная иерархия ===")
-    subtree_request = {
-        "action": "get_hierarchy",
-        "params": {"from_path": "Enemies"}
-    }
-    subtree_response = unity.execute_command(subtree_request)
-    print("Subtree (from_path='Enemies'):")
-    print(json.dumps(subtree_response, indent=2, ensure_ascii=False))
-    wait_for_enter("Все тесты завершены. Нажмите Enter для завершения...")
-
-    print("\nLog saved to:", unity.get_log_file_path())
+    def get_log_path(self) -> str:
+        return self.logging_module.get_log_file_path()
 
 if __name__ == "__main__":
-    main()
+    api = UnitySceneAPI()
+    
+    print("--- Testing Connection & Hierarchy ---")
+    print(json.dumps(api.execute_command({"action": "get_hierarchy"}), indent=2))
+    
+    print("\n--- Testing Input Constants ---")
+    print(json.dumps(api.execute_command({"action": "manage_input", "params": {"sub_action": "constants"}}), indent=2))

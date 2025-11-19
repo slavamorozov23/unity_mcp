@@ -1,21 +1,13 @@
-"""Модули Unity Scene API Client
-
-Этот пакет содержит модульную реализацию клиента Unity Scene API.
-Каждый модуль отвечает за одну конкретную функцию:
-
-- get_hierarchy_module: Получение иерархии сцены
-- get_components_module: Получение компонентов объекта
-- create_object_module: Создание новых объектов
-- delete_object_module: Удаление объектов
-- modify_component_module: Модификация компонентов
-- add_component_module: Добавление компонентов
-- remove_component_module: Удаление компонентов
-- find_objects_module: Поиск объектов по имени
-- scene_management_module: Управление сценами
-- logging_module: Логирование операций
 """
+Unity Scene API Modules Package.
+Exposes all agent capabilities including Smart Vision and Input.
+"""
+from .common import HTTPClient
+from .get_hierarchy import GetHierarchyModule
+from .nlp import NLPSearchModule
+from .logging import LoggingModule
 
-from .get_hierarchy_module import GetHierarchyModule
+# Core Modules
 from .get_components_module import GetComponentsModule
 from .create_object_module import CreateObjectModule
 from .delete_object_module import DeleteObjectModule
@@ -24,17 +16,57 @@ from .add_component_module import AddComponentModule
 from .remove_component_module import RemoveComponentModule
 from .find_objects_module import FindObjectsModule
 from .scene_management_module import SceneManagementModule
-from .logging_module import LoggingModule
+from .object_picker_module import ObjectPickerModule
+from .picker_component_variants_module import PickerComponentVariantsModule
+from .create_object_from_prefab_module import CreateObjectFromPrefabModule
+from .save_object_as_prefab_module import SaveObjectAsPrefabModule
+from .instantiate_prefab_module import InstantiatePrefabModule
+from .get_prefabs_list_module import GetPrefabsListModule
+from .move_object_module import MoveObjectModule
+from .reset_object_module import ResetObjectModule
+from .rename_object_module import RenameObjectModule
+from .set_object_active_module import SetObjectActiveModule
+
+# Stage 1: Vision & Debug (Smart)
+from .game_view_snapshot_module import GameViewSnapshotModule
+from .tilemap_snapshot_module import TilemapSnapshotModule
+from .get_logs_module import GetLogsModule
+from .search_logs_module import SearchLogsModule
+from .get_scene_status_module import GetSceneStatusModule
+from .play_control_module import PlayControlModule
+
+# Stage 2: Assets & Files
+from .get_creation_templates_module import GetCreationTemplatesModule
+from .create_from_template_module import CreateFromTemplateModule
+from .get_asset_info_module import GetAssetInfoModule
+from .modify_asset_module import ModifyAssetModule
+from .get_asset_picker_options_module import GetAssetPickerOptionsModule
+
+# Stage 3: Tilemaps
+from .get_tilemaps_module import GetTilemapsModule
+from .paint_tile_module import PaintTileModule
+from .manage_tile_asset_module import ManageTileAssetModule
+
+# Stage 4: Animation & Input
+from .get_anim_info_module import GetAnimInfoModule
+from .manage_anim_property_module import ManageAnimPropertyModule
+from .manage_input_axis_module import ManageInputAxisModule
+from .get_input_constants_module import GetInputConstantsModule
 
 __all__ = [
-    'GetHierarchyModule',
-    'GetComponentsModule',
-    'CreateObjectModule',
-    'DeleteObjectModule',
-    'ModifyComponentModule',
-    'AddComponentModule',
-    'RemoveComponentModule',
-    'FindObjectsModule',
-    'SceneManagementModule',
-    'LoggingModule'
+    "HTTPClient",
+    "GetHierarchyModule", "NLPSearchModule", "LoggingModule",
+    "GetComponentsModule", "CreateObjectModule", "DeleteObjectModule",
+    "ModifyComponentModule", "AddComponentModule", "RemoveComponentModule",
+    "FindObjectsModule", "SceneManagementModule", "ObjectPickerModule",
+    "PickerComponentVariantsModule", "CreateObjectFromPrefabModule",
+    "SaveObjectAsPrefabModule", "InstantiatePrefabModule", "GetPrefabsListModule",
+    "MoveObjectModule", "ResetObjectModule", "RenameObjectModule", "SetObjectActiveModule",
+    "GameViewSnapshotModule", "TilemapSnapshotModule", "GetLogsModule",
+    "SearchLogsModule", "GetSceneStatusModule", "PlayControlModule",
+    "GetCreationTemplatesModule", "CreateFromTemplateModule", "GetAssetInfoModule",
+    "ModifyAssetModule", "GetAssetPickerOptionsModule",
+    "GetTilemapsModule", "PaintTileModule", "ManageTileAssetModule",
+    "GetAnimInfoModule", "ManageAnimPropertyModule", "ManageInputAxisModule",
+    "GetInputConstantsModule"
 ]

@@ -12,21 +12,21 @@ namespace SceneAPI.Modules
         {
             try
             {
-                var activeScene = SceneManager.GetActiveScene();
+                Scene activeScene = SceneManager.GetActiveScene();
                 if (!activeScene.IsValid())
                 {
                     return JsonConvert.SerializeObject(new { error = "No active scene found" });
                 }
 
-                var rootObjects = activeScene.GetRootGameObjects()
-                    .Select(go => GetGameObjectData(go))
+                object[] rootObjects = activeScene.GetRootGameObjects()
+                    .Select(static go => GetGameObjectData(go))
                     .ToArray();
 
                 var sceneData = new
                 {
                     sceneName = activeScene.name,
                     scenePath = activeScene.path,
-                    rootObjects = rootObjects,
+                    rootObjects,
                     totalObjects = CountTotalObjects(rootObjects)
                 };
 
@@ -40,7 +40,7 @@ namespace SceneAPI.Modules
 
         private static object GetGameObjectData(GameObject go)
         {
-            var children = new object[go.transform.childCount];
+            object[] children = new object[go.transform.childCount];
             for (int i = 0; i < go.transform.childCount; i++)
             {
                 children[i] = GetGameObjectData(go.transform.GetChild(i).gameObject);
@@ -48,22 +48,20 @@ namespace SceneAPI.Modules
 
             return new
             {
-                name = go.name,
+                go.name,
                 path = GetGameObjectPath(go),
                 active = go.activeInHierarchy,
                 components = go.GetComponents<Component>()
-                    .Where(c => c != null)
-                    .Select(c => c.GetType().Name)
+                    .Where(static c => c != null)
+                    .Select(static c => c.GetType().Name)
                     .ToArray(),
-                children = children
+                children
             };
         }
 
         private static string GetGameObjectPath(GameObject go)
         {
-            if (go.transform.parent == null)
-                return go.name;
-            return GetGameObjectPath(go.transform.parent.gameObject) + "/" + go.name;
+            return go.transform.parent == null ? go.name : GetGameObjectPath(go.transform.parent.gameObject) + "/" + go.name;
         }
 
         private static int CountTotalObjects(object[] rootObjects)

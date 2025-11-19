@@ -36,25 +36,46 @@ namespace SceneAPI.Modules
                     });
                 }
 
-                Type type = Type.GetType($"UnityEngine.{componentType}, UnityEngine") ??
-                           Type.GetType($"{componentType}, Assembly-CSharp");
+                // Прямое получение типа по точному имени
+                Type type = Type.GetType(componentType);
+                
+                if (type == null)
+                {
+                    // Попробуем найти тип в загруженных сборках
+                    foreach (var assembly in System.AppDomain.CurrentDomain.GetAssemblies())
+                    {
+                        type = assembly.GetType(componentType);
+                        if (type != null) break;
+                    }
+                }
 
                 if (type == null)
                 {
                     return JsonConvert.SerializeObject(new 
                     { 
                         success = false, 
-                        error = "Component type not found" 
+                        error = $"Component type '{componentType}' not found in any loaded assembly" 
                     });
                 }
 
+                // Проверяем, есть ли уже такой компонент
+                Component existingComponent = obj.GetComponent(type);
+                bool hasExistingComponent = existingComponent != null;
+                
+                // Подсчитываем общее количество компонентов
+                int componentCount = obj.GetComponents<Component>().Length;
+                
                 obj.AddComponent(type);
                 
-                return JsonConvert.SerializeObject(new 
+                var response = new 
                 { 
                     success = true, 
-                    message = $"Component {componentType} added to {objectPath}" 
-                });
+                    message = $"Component {componentType} added to {objectPath}",
+                    warning = componentCount > 1 ? $"Object now has {componentCount + 1} components" : null,
+                    duplicateWarning = hasExistingComponent ? $"Component {componentType} was already present on this object" : null
+                };
+                
+                return JsonConvert.SerializeObject(response);
             }
             catch (Exception ex)
             {

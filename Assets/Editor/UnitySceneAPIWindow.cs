@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEditor;
 using UnityEditor.Compilation;
 using SceneAPI;
+using System.Net;
 
 public class UnitySceneAPIWindow : EditorWindow
 {
@@ -108,6 +109,11 @@ public class UnitySceneAPIWindow : EditorWindow
                 StopServer();
             }
 
+            if (GUILayout.Button("Test Create From Template"))
+            {
+                TestCreateFromTemplate();
+            }
+
             GUILayout.Label($"Server running on: http://localhost:{port}");
             GUILayout.Label("Available endpoints:");
             GUILayout.Label("  GET /scene - Get scene hierarchy");
@@ -121,6 +127,7 @@ public class UnitySceneAPIWindow : EditorWindow
             GUILayout.Label("  POST /objects/components/add - Add component");
             GUILayout.Label("  PUT /objects/components/modify - Modify component");
             GUILayout.Label("  DELETE /objects/components/remove - Remove component");
+            GUILayout.Label("  POST /templates/create/test - Test create from template");
         }
     }
 
@@ -139,6 +146,21 @@ public class UnitySceneAPIWindow : EditorWindow
         if (server != null)
         {
             server.StopServer();
+        }
+    }
+
+    void TestCreateFromTemplate()
+    {
+        try
+        {
+            using (var client = new WebClient())
+            {
+                client.UploadString($"http://localhost:{port}/templates/create/test", "POST", "");
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError(e.Message);
         }
     }
 
