@@ -3,6 +3,7 @@ using System.Net;
 using System.Text;
 using Newtonsoft.Json;
 using SceneAPI.Modules;
+using UnityEngine;
 
 namespace SceneAPI
 {
@@ -14,60 +15,57 @@ namespace SceneAPI
 
         public string HandleRequest(string method, string path, HttpListenerContext context)
         {
-            // Для POST/PUT запросов считываем тело один раз, если модуль его требует
-            // Но так как каждый модуль сам читает поток (что может вызвать ошибку, если поток не seekable),
-            // лучше передавать тело строки. Однако текущая архитектура модулей (Execute(context))
-            // предполагает чтение внутри. Оставим как есть для существующих, 
-            // а новые сделаем на передаче строки.
-            
-            // Примечание: В идеале нужно рефакторить все модули на прием строки или DTO.
-            // Ниже - гибридный подход для совместимости с вашим текущим кодом.
-
+            // Special handling for "Smart" modules that need complex parameters or logic
             if (method == "POST" && path == "/debug/snapshot")
-                return new GameViewSnapshotModule().Execute(GetRequestBody(context));
+            {
+                return new SmartSnapshotModule().Execute(GetRequestBody(context));
+            }
             
             if (method == "POST" && path == "/debug/tilemap/snapshot")
+            {
                 return new TilemapSnapshotModule().Execute(GetRequestBody(context));
+            }
 
-            // Стандартные endpoints
             return $"{method} {path}" switch
             {
-                // Scene endpoints
+                // --- Scene Management ---
                 "GET /scene" => GetHierarchyModule.Execute(),
                 "POST /scene/open" => SceneManagementModule.OpenScene(context),
                 "GET /build/scenes" => SceneManagementModule.GetBuildScenes(),
                 "POST /build/scenes/add" => SceneManagementModule.AddSceneToBuild(context),
                 "DELETE /build/scenes/remove" => SceneManagementModule.RemoveSceneFromBuild(context),
-                
-                // GameObject endpoints
+                "GET /scene/status" => new GetSceneStatusModule().Execute("{}"),
+                "POST /scene/control" => new PlayControlModule().Execute(GetRequestBody(context)),
+
+                // --- Game Objects ---
                 "POST /objects/create" => CreateObjectModule.Execute(context),
                 "DELETE /objects/delete" => DeleteObjectModule.Execute(context),
-                "POST /objects/create/prefab" => CreateObjectFromPrefabModule.Execute(context),
-                "POST /objects/save/prefab" => SaveObjectAsPrefabModule.Execute(context),
-                "POST /objects/instantiate/prefab" => InstantiatePrefabModule.Execute(context),
-                "GET /prefabs" => GetPrefabsListModule.Execute(context),
                 "PUT /objects/move" => MoveObjectModule.Execute(context),
                 "PUT /objects/reset" => ResetObjectModule.Execute(context),
                 "PUT /objects/rename" => RenameObjectModule.Execute(context),
                 "PUT /objects/active" => SetObjectActiveModule.Execute(context),
                 
-                // Component endpoints
+                // --- Prefabs ---
+                "POST /objects/create/prefab" => CreateObjectFromPrefabModule.Execute(context),
+                "POST /objects/save/prefab" => SaveObjectAsPrefabModule.Execute(context),
+                "POST /objects/instantiate/prefab" => InstantiatePrefabModule.Execute(context),
+                "GET /prefabs" => GetPrefabsListModule.Execute(context),
+
+                // --- Components ---
                 "GET /objects/components" => GetComponentsModule.Execute(context),
                 "POST /objects/components/add" => AddComponentModule.Execute(context),
                 "PUT /objects/components/modify" => ModifyComponentModule.Execute(context),
                 "DELETE /objects/components/remove" => RemoveComponentModule.Execute(context),
-                
-                // Picker endpoints
-                "GET /objects/picker" => ObjectPickerModule.Execute(context),
                 "GET /components/variants" => PickerComponentVariantsModule.Execute(context),
+
+                // --- Helpers & Pickers ---
+                "GET /objects/picker" => ObjectPickerModule.Execute(context),
                 
-                // Debug and Control endpoints
+                // --- Logs ---
                 "GET /logs" => new GetLogsModule().Execute("{}"),
                 "POST /logs/search" => new SearchLogsModule().Execute(GetRequestBody(context)),
-                "GET /scene/status" => new GetSceneStatusModule().Execute("{}"),
-                "POST /scene/control" => new PlayControlModule().Execute(GetRequestBody(context)),
-                
-                // Asset and Template endpoints (Существующие в вашем коде)
+
+                // --- Assets & Files ---
                 "POST /templates/search" => new GetCreationTemplatesModule().Execute(GetRequestBody(context)),
                 "POST /templates/create" => new CreateFromTemplateModule().Execute(GetRequestBody(context)),
                 "POST /templates/create/test" => new CreateFromTemplateModule().ExecuteTest(),
@@ -75,7 +73,20 @@ namespace SceneAPI
                 "PUT /assets/modify" => new ModifyAssetModule().Execute(GetRequestBody(context)),
                 "POST /assets/picker/options" => new GetAssetPickerOptionsModule().Execute(GetRequestBody(context)),
 
-                _ => JsonConvert.SerializeObject(new { error = "Endpoint not found" }),
+                // --- Tilemaps ---
+                "GET /tilemaps" => new GetTilemapsModule().Execute(GetRequestBody(context)),
+                "POST /tilemaps/paint" => new PaintTileModule().Execute(GetRequestBody(context)),
+                "POST /tilemaps/assets" => new ManageTileAssetModule().Execute(GetRequestBody(context)),
+
+                // --- Animation ---
+                "POST /animation/info" => new GetAnimInfoModule().Execute(GetRequestBody(context)),
+                "POST /animation/modify" => new ManageAnimPropertyModule().Execute(GetRequestBody(context)),
+
+                // --- Input ---
+                "GET /input/constants" => new GetInputConstantsModule().Execute(GetRequestBody(context)),
+                "POST /input/axes" => new ManageInputAxisModule().Execute(GetRequestBody(context)),
+
+                _ => JsonConvert.SerializeObject(new { error = $"Endpoint not found: {method} {path}" }),
             };
         }
 
@@ -83,12 +94,14 @@ namespace SceneAPI
         {
             try
             {
-                // Если поток уже прочитан, это может вызвать проблему.
-                // В текущей реализации мы полагаемся на то, что поток читается только один раз нужным модулем.
-                using (var reader = new StreamReader(context.Request.InputStream, Encoding.UTF8))
+                if (context.Request.HasEntityBody)
                 {
-                    return reader.ReadToEnd();
+                    using (var reader = new StreamReader(context.Request.InputStream, context.Request.ContentEncoding))
+                    {
+                        return reader.ReadToEnd();
+                    }
                 }
+                return "{}";
             }
             catch
             {

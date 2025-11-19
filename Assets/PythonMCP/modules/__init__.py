@@ -2,10 +2,9 @@
 Unity Scene API Modules Package.
 Exposes all agent capabilities including Smart Vision and Input.
 """
-from .common import HTTPClient
-from .get_hierarchy import GetHierarchyModule
-from .nlp import NLPSearchModule
-from .logging import LoggingModule
+from .get_hierarchy_module import GetHierarchyModule
+from .nlp_search_module import NLPSearchModule
+from .logging_module import LoggingModule
 
 # Core Modules
 from .get_components_module import GetComponentsModule
@@ -54,7 +53,6 @@ from .manage_input_axis_module import ManageInputAxisModule
 from .get_input_constants_module import GetInputConstantsModule
 
 __all__ = [
-    "HTTPClient",
     "GetHierarchyModule", "NLPSearchModule", "LoggingModule",
     "GetComponentsModule", "CreateObjectModule", "DeleteObjectModule",
     "ModifyComponentModule", "AddComponentModule", "RemoveComponentModule",
