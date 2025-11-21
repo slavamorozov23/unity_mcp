@@ -13,15 +13,13 @@ namespace SceneAPI.Modules
         [Serializable]
         public class AssetInfoRequest
         {
-            public string assetPath;            // Можно путь "Assets/..." или относительный; также можно оставить пустым и передать guid
-            public string guid;                 // Опционально: можно передавать GUID вместо пути
-
-            // Опциональные флаги (дефолты сохраняют прежнее поведение, но добавляют больше полезной инфы)
-            public bool includeSerializedProperties = true;   // свойства самого ассета (SerializedObject)
-            public bool includeImporterSerialized = true;      // свойства импортера (SerializedObject)
-            public bool includeSubAssets = true;               // список саб-ассетов (например, анимации внутри FBX)
-            public bool includeDependencies = false;           // зависимости ассета (AssetDatabase.GetDependencies)
-            public bool flattenPropertyPaths = false;          // если true — value для сложных типов будет более “плоским”
+            public string assetPath;
+            public string guid;
+            public bool includeSerializedProperties = true;
+            public bool includeImporterSerialized = true;
+            public bool includeSubAssets = true;
+            public bool includeDependencies = false;
+            public bool flattenPropertyPaths = false;
         }
 
         [Serializable]
@@ -30,7 +28,7 @@ namespace SceneAPI.Modules
             public string name;
             public string displayName;
             public string type;
-            public string path;       // SerializedProperty.propertyPath
+            public string path;
             public object value;
             public bool isEditable;
             public string description;
@@ -71,7 +69,6 @@ namespace SceneAPI.Modules
             {
                 var request = JsonConvert.DeserializeObject<AssetInfoRequest>(requestBody) ?? new AssetInfoRequest();
 
-                // Разрешаем GUID
                 if (!string.IsNullOrEmpty(request.guid) && string.IsNullOrEmpty(request.assetPath))
                 {
                     var pathByGuid = AssetDatabase.GUIDToAssetPath(request.guid);
@@ -89,8 +86,6 @@ namespace SceneAPI.Modules
                 }
 
                 var assetPath = NormalizeAssetsPath(request.assetPath);
-
-                // Существование ассета/папки
                 bool exists = AssetExists(assetPath);
                 if (!exists)
                 {
@@ -125,7 +120,6 @@ namespace SceneAPI.Modules
             var asset = isFolder ? null : AssetDatabase.LoadMainAssetAtPath(assetPath);
             var guid = AssetDatabase.AssetPathToGUID(assetPath);
 
-            // Файловая инфа
             long fileSize = 0;
             string lastModified = "Unknown";
             try
@@ -134,9 +128,7 @@ namespace SceneAPI.Modules
                 if (isFolder)
                 {
                     if (Directory.Exists(abs))
-                    {
                         lastModified = Directory.GetLastWriteTime(abs).ToString("yyyy-MM-dd HH:mm:ss");
-                    }
                 }
                 else
                 {
@@ -148,7 +140,7 @@ namespace SceneAPI.Modules
                     }
                 }
             }
-            catch { /* ignore */ }
+            catch { }
 
             var info = new AssetInfo
             {
@@ -170,7 +162,6 @@ namespace SceneAPI.Modules
                 importSettings = new Dictionary<string, object>()
             };
 
-            // Саб-ассеты (например, анимации внутри модели/FBX, спрайты в текстуре)
             if (request.includeSubAssets && !isFolder)
             {
                 var subAssets = AssetDatabase.LoadAllAssetRepresentationsAtPath(assetPath);
@@ -187,7 +178,6 @@ namespace SceneAPI.Modules
                 }
             }
 
-            // Зависимости (пути)
             if (request.includeDependencies)
             {
                 var deps = AssetDatabase.GetDependencies(assetPath, true)
@@ -197,14 +187,12 @@ namespace SceneAPI.Modules
                 info.dependencies = deps;
             }
 
-            // Свойства ассета
             if (request.includeSerializedProperties && !isFolder && asset != null)
             {
                 var so = new SerializedObject(asset);
                 info.properties = ReadSerializedObject(so, request.flattenPropertyPaths);
             }
 
-            // Импортер и его настройки
             var importer = AssetImporter.GetAtPath(assetPath);
             if (importer != null)
             {
@@ -216,7 +204,6 @@ namespace SceneAPI.Modules
                 if (request.includeImporterSerialized)
                 {
                     var iso = new SerializedObject(importer);
-                    // Список свойств импортера (универсально для любых ScriptedImporter и плагинов)
                     var importerProps = ReadSerializedObject(iso, request.flattenPropertyPaths);
                     info.importSettings["serializedProperties"] = importerProps;
                 }
@@ -224,8 +211,6 @@ namespace SceneAPI.Modules
 
             return info;
         }
-
-        // -------- SerializedObject helpers --------
 
         private List<AssetProperty> ReadSerializedObject(SerializedObject so, bool flatten)
         {
@@ -238,7 +223,6 @@ namespace SceneAPI.Modules
                 {
                     enterChildren = false;
 
-                    // Пропускаем лишние служебные записи массива размера
                     if (iterator.propertyType == SerializedPropertyType.ArraySize) continue;
 
                     var ap = new AssetProperty
@@ -271,7 +255,6 @@ namespace SceneAPI.Modules
             return list;
         }
 
-        [Obsolete]
         private object ReadPropertyValue(SerializedProperty p, bool flatten)
         {
             try
@@ -358,7 +341,8 @@ namespace SceneAPI.Modules
                             value = k.value,
                             inTangent = k.inTangent,
                             outTangent = k.outTangent,
-                            tangentMode = k.tangentMode
+                            // ИСПРАВЛЕНО: удален tangentMode
+                            weightedMode = k.weightedMode.ToString()
                         }).ToArray();
                         return new { keys, preWrapMode = curve.preWrapMode.ToString(), postWrapMode = curve.postWrapMode.ToString() };
                     }
@@ -406,13 +390,12 @@ namespace SceneAPI.Modules
 #endif
 
                     case SerializedPropertyType.Generic:
-                        // Сложный контейнер (структура/класс). Возвращаем краткую метку.
                         return flatten ? TryFlattenGeneric(p) : "Generic";
                 }
             }
             catch
             {
-                // ignore per-property failures
+                // ignore
             }
 
             return "Complex Type";
@@ -420,7 +403,6 @@ namespace SceneAPI.Modules
 
         private object TryFlattenGeneric(SerializedProperty genericProp)
         {
-            // Попытка “приплюснуть” видимые дочерние поля в небольшой словарь
             try
             {
                 var copy = genericProp.Copy();
@@ -468,8 +450,6 @@ namespace SceneAPI.Modules
                 localId
             };
         }
-
-        // -------- Path / FS helpers --------
 
         private static string NormalizeAssetsPath(string p)
         {

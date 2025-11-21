@@ -11,9 +11,7 @@ def get_client():
     return UnitySceneAPI()
 
 def print_result(test_name, result):
-    if result.get("success"):
-        print(f"✅ [PASS] {test_name}")
-        # print(json.dumps(result, indent=2)) # Раскомментируйте для дебага
-    else:
-        print(f"❌ [FAIL] {test_name}")
-        print(f"   Error: {result.get('error')}")
+    ok = result.get("success")
+    prefix = "✅ [PASS]" if ok else "❌ [FAIL]"
+    print(f"{prefix} {test_name}")
+    print(json.dumps(result, indent=2, ensure_ascii=False))

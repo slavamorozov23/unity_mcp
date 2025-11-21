@@ -43,6 +43,11 @@ namespace SceneAPI
             foreach (var prop in properties)
             {
                 string propertyName = prop.Name;
+
+                // Простые алиасы для наиболее часто используемых свойств Transform
+                if (propertyName == "position") propertyName = "m_LocalPosition";
+                else if (propertyName == "rotation") propertyName = "m_LocalRotation";
+                else if (propertyName == "scale") propertyName = "m_LocalScale";
                 var propertyValue = prop.Value;
 
                 SerializedProperty serializedProperty = serializedObject.FindProperty(propertyName);

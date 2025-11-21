@@ -6,6 +6,12 @@ namespace SceneAPI
 {
     public static class GameObjectUtilities
     {
+        public static string GetGameObjectPath(GameObject go)
+        {
+            if (go == null) return "";
+            return go.transform.parent == null ? go.name : GetGameObjectPath(go.transform.parent.gameObject) + "/" + go.name;
+        }
+
         public static object GetGameObjectData(GameObject go, string parentPath)
         {
             if (go == null) return null;

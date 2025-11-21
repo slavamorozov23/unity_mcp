@@ -10,10 +10,19 @@ namespace SceneAPI.Modules
     {
         public static string Execute(HttpListenerContext context)
         {
+            string objectPath = null;
+            if (context != null && context.Request != null)
+            {
+                objectPath = context.Request.QueryString["path"];
+            }
+
+            return Execute(objectPath);
+        }
+
+        public static string Execute(string objectPath)
+        {
             try
             {
-                string objectPath = context.Request.QueryString["path"];
-                
                 if (string.IsNullOrEmpty(objectPath))
                 {
                     return JsonConvert.SerializeObject(new { error = "Object path is required" });

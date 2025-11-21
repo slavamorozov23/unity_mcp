@@ -11,12 +11,24 @@ namespace SceneAPI.Modules
     {
         public static string Execute(HttpListenerContext context)
         {
+            string objectPath = "";
+            string componentName = "";
+            string parameterName = "";
+
+            if (context != null && context.Request != null)
+            {
+                objectPath = context.Request.QueryString["path"] ?? "";
+                componentName = context.Request.QueryString["component"] ?? "";
+                parameterName = context.Request.QueryString["parameter"] ?? "";
+            }
+
+            return Execute(objectPath, componentName, parameterName);
+        }
+
+        public static string Execute(string objectPath, string componentName = "", string parameterName = "")
+        {
             try
             {
-                string objectPath = context.Request.QueryString["path"] ?? "";
-                string componentName = context.Request.QueryString["component"] ?? "";
-                string parameterName = context.Request.QueryString["parameter"] ?? "";
-
                 var result = new List<object>();
 
                 // Получаем все объекты сцены

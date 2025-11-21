@@ -15,11 +15,8 @@ namespace SceneAPI.Modules
         [Serializable]
         public class CreateFromTemplateRequest
         {
-            // Может быть как "Material", так и "Shader/Unlit Shader" или "My Tools/My Custom Asset"
             public string templateName;
-            // Папка или полный путь. Примеры: "Assets/MyFolder", "Assets/MyFolder/MyFile", "MyFolder"
             public string targetPath;
-            // Необязательно. Если задано — ассет будет переименован после создания (расширение сохраняется)
             public string fileName;
         }
 
@@ -39,7 +36,6 @@ namespace SceneAPI.Modules
                 string folderPath = normalizedTarget;
                 string desiredFileName = string.IsNullOrWhiteSpace(request.fileName) ? null : request.fileName;
 
-                // Если targetPath указывает на файл — извлекаем папку и имя
                 if (!AssetDatabase.IsValidFolder(folderPath))
                 {
                     var dir = Path.GetDirectoryName(normalizedTarget)?.Replace('\\', '/') ?? "Assets";
@@ -60,7 +56,6 @@ namespace SceneAPI.Modules
                 bool usedAttrFallback = false;
                 if (string.IsNullOrEmpty(createdPath))
                 {
-                    // Fallback для ScriptableObject с [CreateAssetMenu]
                     createdPath = TryCreateViaCreateAssetMenuAttribute(request.templateName, folderPath, desiredFileName);
                     usedAttrFallback = !string.IsNullOrEmpty(createdPath);
                 }
@@ -106,8 +101,6 @@ namespace SceneAPI.Modules
             }
         }
 
-        // ---------- Core: вызов реального меню Assets/Create ----------
-
         private static string TryCreateViaAssetsCreateMenu(string template, string folderPath, string desiredFileName, out string usedMenuPath)
         {
             usedMenuPath = null;
@@ -118,27 +111,22 @@ namespace SceneAPI.Modules
                 if (string.IsNullOrEmpty(usedMenuPath))
                     return null;
 
-                // Выделяем папку, чтобы Unity создал ассет именно там
                 var folderObj = AssetDatabase.LoadAssetAtPath<UnityEngine.Object>(folderPath);
                 if (folderObj != null)
                     Selection.activeObject = folderObj;
                 else
                     Selection.activeObject = null;
 
-                // Зафиксируем, что было до
                 var before = new HashSet<string>(AssetDatabase.FindAssets("", new[] { folderPath }));
 
-                // Триггерим настоящий пункт меню
                 bool executed = EditorApplication.ExecuteMenuItem(usedMenuPath);
                 if (!executed)
                     return null;
 
-                // Ждём появления нового ассета в целевой папке (обычно синхронно)
                 var createdPath = WaitForNewAssetInFolder(folderPath, before, 2.0);
                 if (string.IsNullOrEmpty(createdPath))
                     return null;
 
-                // Если нужно — переименуем (расширение сохранится)
                 if (!string.IsNullOrEmpty(desiredFileName))
                 {
                     var cleanName = SanitizeFileNameWithoutExtension(desiredFileName);
@@ -164,14 +152,13 @@ namespace SceneAPI.Modules
             }
         }
 
-        // ---------- Fallback: ScriptableObject с [CreateAssetMenu] ----------
-
         private static string TryCreateViaCreateAssetMenuAttribute(string template, string folderPath, string desiredFileName)
         {
             try
             {
                 var types = TypeCache.GetTypesWithAttribute<CreateAssetMenuAttribute>();
-                if (types == null || types.Count == 0) return null;
+                // ИСПРАВЛЕНО: удалена проверка на null, так как TypeCollection не может быть null
+                if (types.Count == 0) return null;
 
                 string normalized = (template ?? "").Trim().TrimStart('/');
 
@@ -221,8 +208,6 @@ namespace SceneAPI.Modules
             }
         }
 
-        // ---------- Utils ----------
-
         private static string NormalizeAssetsPath(string p)
         {
             if (string.IsNullOrWhiteSpace(p)) return "Assets";
@@ -257,7 +242,6 @@ namespace SceneAPI.Modules
             var list = new List<string>();
             try
             {
-                // Используем внутренний Unsupported.GetSubmenus("Assets/Create") через рефлексию
                 var unsupported = typeof(Editor).Assembly.GetType("UnityEditor.Unsupported");
                 var mi = unsupported?.GetMethod("GetSubmenus", BindingFlags.Static | BindingFlags.Public | BindingFlags.NonPublic);
                 if (mi != null)

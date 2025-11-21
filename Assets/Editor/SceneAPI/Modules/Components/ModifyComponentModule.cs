@@ -9,10 +9,15 @@ namespace SceneAPI.Modules
     {
         public static string Execute(HttpListenerContext context)
         {
+            string requestBody = context != null ? GetRequestBody(context) : "{}";
+            return Execute(requestBody);
+        }
+
+        public static string Execute(string requestBody)
+        {
             try
             {
-                string requestBody = GetRequestBody(context);
-                var data = JsonConvert.DeserializeObject<dynamic>(requestBody);
+                var data = JsonConvert.DeserializeObject<dynamic>(requestBody ?? "{}");
                 
                 string objectPath = data?.path;
                 string componentType = data?.componentType;
