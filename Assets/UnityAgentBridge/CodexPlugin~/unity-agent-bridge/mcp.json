@@ -1,0 +1,11 @@
+{
+  "mcpServers": {
+    "unity-game": {
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command",
+        "$ErrorActionPreference=\"Stop\"; $errorFile=Join-Path $env:LOCALAPPDATA \"UnityAgentBridge\\mcp-error-codex.txt\"; try{$locator=Join-Path $env:LOCALAPPDATA \"UnityAgentBridge\\active-project.json\"; if(-not (Test-Path -LiteralPath $locator -PathType Leaf)){throw \"Unity Agent Bridge has no active project. Restart its server in Unity.\"}; $project=(Get-Content -Raw -LiteralPath $locator | ConvertFrom-Json).projectRoot; if(-not $project){throw \"Unity Agent Bridge active project is invalid.\"}; $python=Join-Path $project \"Library\\UnityAgentBridge\\Runtime\\venv\\Scripts\\python.exe\"; $server=Join-Path $project \"Assets\\UnityAgentBridge\\Python~\\mcp_server.py\"; if(-not (Test-Path -LiteralPath $python -PathType Leaf)){throw \"Unity Agent Bridge runtime is not installed. Start its server in Unity.\"}; if(-not (Test-Path -LiteralPath $server -PathType Leaf)){throw \"Unity Agent Bridge MCP server is missing from Assets.\"}; Remove-Item -LiteralPath $errorFile -ErrorAction SilentlyContinue; & $python $server --project $project --client codex --client-version \"__PLUGIN_VERSION__\"; if($LASTEXITCODE -ne 0){throw \"Unity game MCP exited with code $LASTEXITCODE.\"}; exit 0}catch{$message=$_.Exception.Message.Split([Environment]::NewLine)[0]; New-Item -ItemType Directory -Path (Split-Path -Parent $errorFile) -Force | Out-Null; [IO.File]::WriteAllText($errorFile,$message,[Text.UTF8Encoding]::new($false)); [Console]::Error.WriteLine($message); exit 1}"
+      ]
+    }
+  }
+}
